@@ -17,13 +17,6 @@ namespace HRM_BE.Core.Models.Salary.KpiTableDetail
         public double? CompletionRate { get; set; }
         public double? Bonus { get; set; }
 
-        // Doanh thu theo nhân viên
-        public decimal? Revenue { get; set; }
-
-        // Hoa hồng nhập tay (override)
-        public bool? IsCommissionManual { get; set; }
-        public decimal? CommissionManualAmount { get; set; }
-        
         //public virtual KpiTableDto? KpiTable { get; set; }
     }
 }

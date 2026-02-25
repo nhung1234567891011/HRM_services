@@ -78,12 +78,6 @@ namespace HRM_BE.Core.Data.Payroll_Timekeeping.Payroll
         public decimal? Bonus { get; set; } // Thưởng
         public decimal? SalaryRate { get; set; } // Tỉ lệ hưởng lương
 
-        // Doanh thu/hoa hồng (snapshot theo kỳ lương)
-        public decimal? Revenue { get; set; } // Doanh thu của nhân viên trong kỳ
-        [Column(TypeName = "decimal(9,6)")]
-        public decimal? CommissionRate { get; set; } // % hoa hồng áp dụng (vd 0.002 = 0.2%)
-        public decimal? CommissionAmount { get; set; } // Tiền hoa hồng (có thể override)
-
         public decimal? TotalSalary { get; set; } // Tổng lương
         public decimal? TotalReceivedSalary { get; set; } // Tổng lương thực nhận
         public PayrollConfirmationStatusEmployee ConfirmationStatus { get; set; } = PayrollConfirmationStatusEmployee.NotSent; // Trạng thái xác nhận lương của nhân viên

@@ -107,18 +107,6 @@ namespace HRM_BE.Data.Repositories
                 .Where(e => e.Contracts.Any(c => c.EmployeeId == e.Id))
                 .ToList();
 
-            // Prefetch position code để xác định CTV/SALE theo PositionCode
-            var staffPositionIds = employees
-                .Where(e => e.StaffPositionId.HasValue)
-                .Select(e => e.StaffPositionId!.Value)
-                .Distinct()
-                .ToList();
-
-            var staffPositionCodeById = _dbContext.StaffPositions
-                .Where(sp => staffPositionIds.Contains(sp.Id))
-                .Select(sp => new { sp.Id, sp.PositionCode })
-                .ToDictionary(x => x.Id, x => x.PositionCode);
-
             var standardWorkDays = _dbContext.ShiftWorks
                 .Where(sw => sw.OrganizationId == payroll.OrganizationId)
                 .Sum(sw => sw.TotalWork);
@@ -158,21 +146,7 @@ namespace HRM_BE.Data.Repositories
                 var bonus = kpiDetail?.Bonus ?? 0;
                 var salaryRate = contract?.SalaryRate ?? 1;
 
-                // Doanh thu + hoa hồng
-                var revenue = kpiDetail?.Revenue ?? 0m;
-                var positionCode = employee.StaffPositionId.HasValue && staffPositionCodeById.TryGetValue(employee.StaffPositionId.Value, out var pc)
-                    ? pc
-                    : null;
-
-                var commissionScheme = GetCommissionSchemeFromPositionCode(positionCode);
-                var commissionRate = GetCommissionRate(revenue, commissionScheme);
-
-                var commissionAmount = (kpiDetail?.IsCommissionManual == true && kpiDetail.CommissionManualAmount.HasValue)
-                    ? kpiDetail.CommissionManualAmount.Value
-                    : revenue * commissionRate;
-
-                var totalSalary = (((decimal)receivedSalary + (decimal)kpiSalary + (decimal)bonus) * ((decimal)salaryRate / 100))
-                                 + commissionAmount;
+                var totalSalary = ((decimal)receivedSalary + (decimal)kpiSalary + (decimal)bonus) * ((decimal)salaryRate / 100);
 
                 var totalReceivedSalary = totalSalary - totalDeductions;
 
@@ -196,9 +170,6 @@ namespace HRM_BE.Data.Repositories
                     Bonus = (decimal)bonus,
 
                     SalaryRate = (decimal)salaryRate,
-                    Revenue = revenue,
-                    CommissionRate = commissionRate,
-                    CommissionAmount = commissionAmount,
                     TotalSalary = (decimal)totalSalary,
                     TotalReceivedSalary = (decimal)totalReceivedSalary,
                     ConfirmationStatus = PayrollConfirmationStatusEmployee.NotSent
@@ -207,40 +178,6 @@ namespace HRM_BE.Data.Repositories
             }
 
             await CreateRangeAsync(payrollDetails);
-        }
-
-        private static string GetCommissionSchemeFromPositionCode(string? positionCode)
-        {
-            var code = (positionCode ?? string.Empty).Trim().ToUpperInvariant();
-            if (code.StartsWith("CTV")) return "CTV";
-            if (code.StartsWith("SALE")) return "SALE";
-            return "NONE";
-        }
-
-        private static decimal GetCommissionRate(decimal revenue, string scheme)
-        {
-            if (revenue <= 0) return 0m;
-
-            if (scheme == "SALE")
-            {
-                if (revenue > 5_000_000_000m) return 0.004m;
-                if (revenue >= 3_000_000_000m) return 0.003m;
-                if (revenue >= 1_000_000_000m) return 0.002m;
-                if (revenue >= 500_000_000m) return 0.001m;
-                return 0m;
-            }
-
-            if (scheme == "CTV")
-            {
-                if (revenue > 5_000_000_000m) return 0.008m;
-                if (revenue >= 3_000_000_000m) return 0.006m;
-                if (revenue >= 1_000_000_000m) return 0.004m;
-                if (revenue >= 500_000_000m) return 0.002m;
-                if (revenue >= 1_000_000m) return 0.001m;
-                return 0m;
-            }
-
-            return 0m;
         }
 
         public async Task RecalculateAndSavePayrollDetails(int payrollId)
@@ -376,9 +313,8 @@ namespace HRM_BE.Data.Repositories
                 var kpiSalary = payrollDetail.KpiSalary ?? 0;
                 var bonus = payrollDetail.Bonus ?? 0;
                 var salaryRate = payrollDetail.SalaryRate ?? 100;
-                var commissionAmount = payrollDetail.CommissionAmount ?? 0;
-
-                payrollDetail.TotalSalary = (receivedSalary + kpiSalary + bonus) * (salaryRate / 100) + commissionAmount;
+                
+                payrollDetail.TotalSalary = (receivedSalary + kpiSalary + bonus) * (salaryRate / 100);
 
                 // TotalReceivedSalary = TotalSalary - tổng khấu trừ (lấy theo nhân viên)
                 var totalDeductions = 0m;

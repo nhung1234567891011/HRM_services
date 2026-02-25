@@ -16,13 +16,6 @@ namespace HRM_BE.Core.Data.Salary
         public double? CompletionRate { get; set; }
         public double? Bonus { get; set; }
 
-        // Doanh thu theo nhân viên (nhập theo KPI table)
-        public decimal? Revenue { get; set; }
-
-        // Cho phép nhập tay hoa hồng (override)
-        public bool? IsCommissionManual { get; set; }
-        public decimal? CommissionManualAmount { get; set; }
-
         public virtual KpiTable? KpiTable { get; set; }
         public virtual Employee? Employee { get; set; }
     }
