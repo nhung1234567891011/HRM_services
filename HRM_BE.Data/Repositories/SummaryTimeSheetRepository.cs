@@ -3,6 +3,7 @@ using HRM_BE.Core.Constants;
 using HRM_BE.Core.Data.Company;
 using HRM_BE.Core.Data.Identity;
 using HRM_BE.Core.Data.Payroll_Timekeeping.Shift;
+using HRM_BE.Core.Data.Payroll_Timekeeping.TimekeepingRegulation;
 using HRM_BE.Core.Data.Staff;
 using HRM_BE.Core.Exceptions;
 using HRM_BE.Core.Extension;
@@ -93,11 +94,56 @@ namespace HRM_BE.Data.Repositories
                 EmployeeCode = e.EmployeeCode,
                 FirstName = e.FirstName,
                 LastName = e.LastName,
-                TotalWorkingDay = 0,
-                TotalHour = 0,
-                TotalLeaveDay = 0,
-                Status = e.SummaryTimesheetNameEmployeeConfirms.Where(s => s.SummaryTimesheetNameId == summaryTimeSheetId).Select(s => s.Status ?? SummaryTimesheetNameEmployeeConfirmStatus.None).FirstOrDefault(),
-                DatePerMonth = e.Timesheets.Where( t => t.Date >= periodTime.minStartDate.Value && t.Date <= periodTime.maxEndDate.Value).Select(s => s.Date.Value.Day).Distinct().Count(),
+                // Timesheets trong kỳ (lọc IsDeleted và Date)
+                TotalHour = e.Timesheets
+                    .Where(t => t.IsDeleted != true
+                                && t.Date.HasValue
+                                && t.Date.Value.Date >= periodTime.minStartDate.Value.Date
+                                && t.Date.Value.Date <= periodTime.maxEndDate.Value.Date)
+                    .Sum(t => t.NumberOfWorkingHour ?? 0),
+                TotalWorkingDay = e.Timesheets
+                    .Where(t => t.IsDeleted != true
+                                && t.Date.HasValue
+                                && t.Date.Value.Date >= periodTime.minStartDate.Value.Date
+                                && t.Date.Value.Date <= periodTime.maxEndDate.Value.Date
+                                && t.TimeKeepingLeaveStatus == TimeKeepingLeaveStatus.None
+                                && (t.NumberOfWorkingHour ?? 0) > 0)
+                    .Select(t => t.Date!.Value.Date)
+                    .Distinct()
+                    .Count(),
+                TotalLeaveDay = e.Timesheets
+                    .Where(t => t.IsDeleted != true
+                                && t.Date.HasValue
+                                && t.Date.Value.Date >= periodTime.minStartDate.Value.Date
+                                && t.Date.Value.Date <= periodTime.maxEndDate.Value.Date
+                                && t.TimeKeepingLeaveStatus != TimeKeepingLeaveStatus.None)
+                    .Select(t => t.Date!.Value.Date)
+                    .Distinct()
+                    .Count(),
+                TotalOtHour = e.Timesheets
+                    .Where(t => t.IsDeleted != true
+                                && t.Date.HasValue
+                                && t.Date.Value.Date >= periodTime.minStartDate.Value.Date
+                                && t.Date.Value.Date <= periodTime.maxEndDate.Value.Date
+                                && t.ShiftWork.ShiftCatalog.AllowOvertime == true
+                                && t.NumberOfWorkingHour.HasValue
+                                && t.ShiftWork.ShiftCatalog.WorkingHours.HasValue
+                                && t.NumberOfWorkingHour > t.ShiftWork.ShiftCatalog.WorkingHours)
+                    .Sum(t => (t.NumberOfWorkingHour ?? 0) - (t.ShiftWork.ShiftCatalog.WorkingHours ?? 0)),
+                DatePerMonth = e.Timesheets
+                    .Where(t => t.IsDeleted != true
+                                && t.Date.HasValue
+                                && t.Date.Value.Date >= periodTime.minStartDate.Value.Date
+                                && t.Date.Value.Date <= periodTime.maxEndDate.Value.Date)
+                    .Select(s => s.Date!.Value.Day)
+                    .Distinct()
+                    .Count(),
+                EqualDay = 0, // có thể dùng TotalHour/8 nếu cần ngày công quy đổi
+                TotalExistLeaveDay = 0, // để mở rộng nếu cần tính số ngày phép tồn
+                Status = e.SummaryTimesheetNameEmployeeConfirms
+                    .Where(s => s.SummaryTimesheetNameId == summaryTimeSheetId)
+                    .Select(s => s.Status ?? SummaryTimesheetNameEmployeeConfirmStatus.None)
+                    .FirstOrDefault(),
                 StaffPosition = new GetDetailTimeSheetStaffPositionDto
                 {
                     Id = e.StaffPosition.Id,
@@ -173,18 +219,55 @@ namespace HRM_BE.Data.Repositories
                 EmployeeCode = e.EmployeeCode,
                 FirstName = e.FirstName,
                 LastName = e.LastName,
-                TotalWorkingDay = 0,
-                TotalHour = 0,
-                TotalLeaveDay = 0,
+                TotalHour = e.Timesheets
+                    .Where(t => t.IsDeleted != true
+                                && t.Date.HasValue
+                                && t.Date.Value.Date >= periodTime.minStartDate.Value.Date
+                                && t.Date.Value.Date <= periodTime.maxEndDate.Value.Date)
+                    .Sum(t => t.NumberOfWorkingHour ?? 0),
+                TotalWorkingDay = e.Timesheets
+                    .Where(t => t.IsDeleted != true
+                                && t.Date.HasValue
+                                && t.Date.Value.Date >= periodTime.minStartDate.Value.Date
+                                && t.Date.Value.Date <= periodTime.maxEndDate.Value.Date
+                                && t.TimeKeepingLeaveStatus == TimeKeepingLeaveStatus.None
+                                && (t.NumberOfWorkingHour ?? 0) > 0)
+                    .Select(t => t.Date!.Value.Date)
+                    .Distinct()
+                    .Count(),
+                TotalLeaveDay = e.Timesheets
+                    .Where(t => t.IsDeleted != true
+                                && t.Date.HasValue
+                                && t.Date.Value.Date >= periodTime.minStartDate.Value.Date
+                                && t.Date.Value.Date <= periodTime.maxEndDate.Value.Date
+                                && t.TimeKeepingLeaveStatus != TimeKeepingLeaveStatus.None)
+                    .Select(t => t.Date!.Value.Date)
+                    .Distinct()
+                    .Count(),
+                TotalOtHour = e.Timesheets
+                    .Where(t => t.IsDeleted != true
+                                && t.Date.HasValue
+                                && t.Date.Value.Date >= periodTime.minStartDate.Value.Date
+                                && t.Date.Value.Date <= periodTime.maxEndDate.Value.Date
+                                && t.ShiftWork.ShiftCatalog.AllowOvertime == true
+                                && t.NumberOfWorkingHour.HasValue
+                                && t.ShiftWork.ShiftCatalog.WorkingHours.HasValue
+                                && t.NumberOfWorkingHour > t.ShiftWork.ShiftCatalog.WorkingHours)
+                    .Sum(t => (t.NumberOfWorkingHour ?? 0) - (t.ShiftWork.ShiftCatalog.WorkingHours ?? 0)),
+                DatePerMonth = e.Timesheets
+                    .Where(t => t.IsDeleted != true
+                                && t.Date.HasValue
+                                && t.Date.Value.Date >= periodTime.minStartDate.Value.Date
+                                && t.Date.Value.Date <= periodTime.maxEndDate.Value.Date)
+                    .Select(s => s.Date!.Value.Day)
+                    .Distinct()
+                    .Count(),
+                EqualDay = 0,
+                TotalExistLeaveDay = 0,
                 Status = e.SummaryTimesheetNameEmployeeConfirms
                     .Where(s => s.SummaryTimesheetNameId == summaryTimeSheetId)
                     .Select(s => s.Status ?? SummaryTimesheetNameEmployeeConfirmStatus.None)
                     .FirstOrDefault(),
-                DatePerMonth = e.Timesheets
-                    .Where(t => t.Date >= periodTime.minStartDate.Value && t.Date <= periodTime.maxEndDate.Value)
-                    .Select(s => s.Date.Value.Day)
-                    .Distinct()
-                    .Count(),
                 StaffPosition = new GetDetailTimeSheetStaffPositionDto
                 {
                     Id = e.StaffPosition.Id,

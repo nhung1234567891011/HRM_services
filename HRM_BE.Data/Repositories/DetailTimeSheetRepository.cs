@@ -228,7 +228,17 @@ namespace HRM_BE.Data.Repositories
                                 TimekeepingType = t.TimekeepingType,
                                 ShiftTableName = t.ShiftWork.ShiftTableName,
                                 TimeKeepingLeaveStatus = t.TimeKeepingLeaveStatus,
-                                IsEnoughWork = t.NumberOfWorkingHour >= (t.ShiftWork.ShiftCatalog.WorkingHours ?? 0)
+                                IsEnoughWork = t.NumberOfWorkingHour >= (t.ShiftWork.ShiftCatalog.WorkingHours ?? 0),
+                                OvertimeHours = (t.ShiftWork.ShiftCatalog.AllowOvertime == true
+                                                 && t.NumberOfWorkingHour.HasValue
+                                                 && t.ShiftWork.ShiftCatalog.WorkingHours.HasValue
+                                                 && t.NumberOfWorkingHour > t.ShiftWork.ShiftCatalog.WorkingHours)
+                                                ? t.NumberOfWorkingHour - t.ShiftWork.ShiftCatalog.WorkingHours
+                                                : 0,
+                                IsOvertime = (t.ShiftWork.ShiftCatalog.AllowOvertime == true
+                                              && t.NumberOfWorkingHour.HasValue
+                                              && t.ShiftWork.ShiftCatalog.WorkingHours.HasValue
+                                              && t.NumberOfWorkingHour > t.ShiftWork.ShiftCatalog.WorkingHours)
                             }).ToList()
                         }).ToList(),
                     IsOffical = e.Contracts.Any(c => !c.ContractName.Contains(ContractConstant.InterContract) && c.SignStatus == SignStatus.Signed),
@@ -321,7 +331,17 @@ namespace HRM_BE.Data.Repositories
                         TimekeepingType = t.TimekeepingType,
                         ShiftTableName = t.ShiftWork.ShiftTableName,
                         TimeKeepingLeaveStatus = t.TimeKeepingLeaveStatus,
-                        IsEnoughWork = t.NumberOfWorkingHour >= (t.ShiftWork.ShiftCatalog.WorkingHours ?? 0) ? true : false
+                        IsEnoughWork = t.NumberOfWorkingHour >= (t.ShiftWork.ShiftCatalog.WorkingHours ?? 0),
+                        OvertimeHours = (t.ShiftWork.ShiftCatalog.AllowOvertime == true
+                                         && t.NumberOfWorkingHour.HasValue
+                                         && t.ShiftWork.ShiftCatalog.WorkingHours.HasValue
+                                         && t.NumberOfWorkingHour > t.ShiftWork.ShiftCatalog.WorkingHours)
+                                        ? t.NumberOfWorkingHour - t.ShiftWork.ShiftCatalog.WorkingHours
+                                        : 0,
+                        IsOvertime = (t.ShiftWork.ShiftCatalog.AllowOvertime == true
+                                      && t.NumberOfWorkingHour.HasValue
+                                      && t.ShiftWork.ShiftCatalog.WorkingHours.HasValue
+                                      && t.NumberOfWorkingHour > t.ShiftWork.ShiftCatalog.WorkingHours)
                     }).ToList()
                 }).ToList(),
                 IsOffical = e.Contracts.Where(c => !c.ContractName.Contains(ContractConstant.InterContract) && c.SignStatus == SignStatus.Signed).FirstOrDefault() != null ? true : false,

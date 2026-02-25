@@ -11,6 +11,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
@@ -146,9 +147,54 @@ namespace HRM_BE.Data.Repositories
                 var bonus = kpiDetail?.Bonus ?? 0;
                 var salaryRate = contract?.SalaryRate ?? 1;
 
-                var totalSalary = ((decimal)receivedSalary + (decimal)kpiSalary + (decimal)bonus) * ((decimal)salaryRate / 100);
+                // Lương 1 ngày
+                var dailySalary = standardWorkDays > 0 ? baseSalary / (decimal)standardWorkDays : 0;
 
-                var totalReceivedSalary = totalSalary - totalDeductions;
+                // Đọc cấu hình thành phần lương từ SalaryComponents (theo tổ chức của bảng lương hoặc nhân viên)
+                var organizationIdForComponent = payroll.OrganizationId ?? employee.OrganizationId;
+                var allowanceMealTravel = GetSalaryComponentAmount(organizationIdForComponent, "ALLOWANCE_MEAL_TRAVEL", 1_000_000m);
+                var parkingPerDay = GetSalaryComponentAmount(organizationIdForComponent, "PARKING", 3_000m);
+                var parkingAmount = parkingPerDay * (decimal)actualWorkDays;
+
+                // Tính giờ OT thô theo ngày: tổng giờ làm trong ngày vượt quá 8h (đã trừ nghỉ trưa trong NumberOfWorkingHour nếu có)
+                var employeeTimesheetsInPeriod = timesheet
+                    .Where(t => t.IsDeleted != true
+                                && t.Date.HasValue
+                                && t.Date.Value.Month == payroll.CreatedAt.Value.Month
+                                && t.Date.Value.Year == payroll.CreatedAt.Value.Year
+                                && t.NumberOfWorkingHour.HasValue)
+                    .ToList();
+
+                var rawOtHours = employeeTimesheetsInPeriod
+                    .GroupBy(t => t.Date!.Value.Date)
+                    .Sum(g =>
+                    {
+                        var totalHoursInDay = g.Sum(x => (decimal)(x.NumberOfWorkingHour ?? 0));
+                        var normalHours = Math.Min(totalHoursInDay, 8m);
+                        return totalHoursInDay > normalHours ? totalHoursInDay - normalHours : 0m;
+                    });
+
+                // Quy đổi sang giờ thập phân theo bảng làm tròn phút
+                var rawOtMinutes = rawOtHours * 60m;
+                var wholeHours = Math.Floor(rawOtMinutes / 60m);
+                var remainingMinutes = (int)(rawOtMinutes - wholeHours * 60m);
+                var decimalPart = MapMinutesToOtDecimal(remainingMinutes);
+                var otHoursDecimal = (decimal)wholeHours + decimalPart;
+
+                // Hệ số OT 200%
+                var otHoursForPay = otHoursDecimal * 2m;
+                var otDays = otHoursForPay / 8m;
+                var overtimeAmount = otDays * dailySalary;
+
+                // BHXH: lấy từ SalaryComponents, fallback 1.632.000
+                var bhxhAmount = GetSalaryComponentAmount(organizationIdForComponent, "BHXH", 1_632_000m);
+
+                // Lương lõi (lương cứng + KPI + thưởng) áp tỷ lệ hưởng
+                var coreSalary = ((decimal)receivedSalary + (decimal)kpiSalary + (decimal)bonus) * ((decimal)salaryRate / 100);
+
+                var totalSalary = coreSalary + allowanceMealTravel + parkingAmount + overtimeAmount;
+
+                var totalReceivedSalary = totalSalary - (totalDeductions + bhxhAmount);
 
                 // 3. Lưu vào bảng PayrollDetail
                 payrollDetails.Add(new PayrollDetail
@@ -170,6 +216,10 @@ namespace HRM_BE.Data.Repositories
                     Bonus = (decimal)bonus,
 
                     SalaryRate = (decimal)salaryRate,
+                    AllowanceMealTravel = allowanceMealTravel,
+                    ParkingAmount = parkingAmount,
+                    OvertimeAmount = overtimeAmount,
+                    BhxhAmount = bhxhAmount,
                     TotalSalary = (decimal)totalSalary,
                     TotalReceivedSalary = (decimal)totalReceivedSalary,
                     ConfirmationStatus = PayrollConfirmationStatusEmployee.NotSent
@@ -178,6 +228,51 @@ namespace HRM_BE.Data.Repositories
             }
 
             await CreateRangeAsync(payrollDetails);
+        }
+
+        private static decimal MapMinutesToOtDecimal(int minutes)
+        {
+            if (minutes <= 5) return 0.00m;
+            if (minutes <= 10) return 0.10m;
+            if (minutes <= 15) return 0.25m;
+            if (minutes <= 20) return 0.30m;
+            if (minutes <= 30) return 0.50m;
+            if (minutes <= 45) return 0.75m;
+            return 1.00m; // 46-59
+        }
+
+        private decimal GetSalaryComponentAmount(int? organizationId, string componentCode, decimal defaultValue)
+        {
+            if (!organizationId.HasValue)
+            {
+                return defaultValue;
+            }
+
+            var component = _dbContext.SalaryComponents
+                .FirstOrDefault(c =>
+                    c.OrganizationId == organizationId.Value &&
+                    c.ComponentCode == componentCode &&
+                    c.IsDeleted != true &&
+                    c.Status == Status.Tracking);
+
+            if (component == null || string.IsNullOrWhiteSpace(component.ValueFormula))
+            {
+                return defaultValue;
+            }
+
+            // Ưu tiên parse theo invariant, fallback sang vi-VN
+            if (decimal.TryParse(component.ValueFormula, NumberStyles.Any, CultureInfo.InvariantCulture, out var value))
+            {
+                return value;
+            }
+
+            var viCulture = CultureInfo.GetCultureInfo("vi-VN");
+            if (decimal.TryParse(component.ValueFormula, NumberStyles.Any, viCulture, out value))
+            {
+                return value;
+            }
+
+            return defaultValue;
         }
 
         public async Task RecalculateAndSavePayrollDetails(int payrollId)
@@ -313,10 +408,17 @@ namespace HRM_BE.Data.Repositories
                 var kpiSalary = payrollDetail.KpiSalary ?? 0;
                 var bonus = payrollDetail.Bonus ?? 0;
                 var salaryRate = payrollDetail.SalaryRate ?? 100;
-                
-                payrollDetail.TotalSalary = (receivedSalary + kpiSalary + bonus) * (salaryRate / 100);
 
-                // TotalReceivedSalary = TotalSalary - tổng khấu trừ (lấy theo nhân viên)
+                var allowanceMealTravel = payrollDetail.AllowanceMealTravel ?? 1_000_000m;
+                var parkingAmount = payrollDetail.ParkingAmount
+                                     ?? 3_000m * (decimal)(payrollDetail.ActualWorkDays ?? 0);
+                var overtimeAmount = payrollDetail.OvertimeAmount ?? 0m;
+                var bhxhAmount = payrollDetail.BhxhAmount ?? 1_632_000m;
+
+                var coreSalary = (receivedSalary + kpiSalary + bonus) * (salaryRate / 100);
+                payrollDetail.TotalSalary = coreSalary + allowanceMealTravel + parkingAmount + overtimeAmount;
+
+                // TotalReceivedSalary = TotalSalary - (BHXH + tổng khấu trừ khác theo nhân viên)
                 var totalDeductions = 0m;
                 if (payrollDetail.EmployeeId.HasValue)
                 {
@@ -324,7 +426,7 @@ namespace HRM_BE.Data.Repositories
                         .Where(d => d.EmployeeId == payrollDetail.EmployeeId.Value)
                         .Sum(d => d.Value) ?? 0;
                 }
-                payrollDetail.TotalReceivedSalary = payrollDetail.TotalSalary - totalDeductions;
+                payrollDetail.TotalReceivedSalary = payrollDetail.TotalSalary - (bhxhAmount + totalDeductions);
             }
 
             await UpdateAsync(payrollDetail);

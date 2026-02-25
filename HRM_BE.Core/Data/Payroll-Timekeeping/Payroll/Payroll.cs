@@ -78,6 +78,11 @@ namespace HRM_BE.Core.Data.Payroll_Timekeeping.Payroll
         public decimal? Bonus { get; set; } // Thưởng
         public decimal? SalaryRate { get; set; } // Tỉ lệ hưởng lương
 
+        public decimal? AllowanceMealTravel { get; set; } // Phụ cấp đi lại, ăn trưa
+        public decimal? ParkingAmount { get; set; } // Tiền gửi xe công ty
+        public decimal? OvertimeAmount { get; set; } // Lương tăng ca
+        public decimal? BhxhAmount { get; set; } // BHXH phải trừ
+
         public decimal? TotalSalary { get; set; } // Tổng lương
         public decimal? TotalReceivedSalary { get; set; } // Tổng lương thực nhận
         public PayrollConfirmationStatusEmployee ConfirmationStatus { get; set; } = PayrollConfirmationStatusEmployee.NotSent; // Trạng thái xác nhận lương của nhân viên

@@ -4,6 +4,7 @@ using HRM_BE.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace HRM_BE.Data.Migrations
 {
     [DbContext(typeof(HrmContext))]
-    partial class HrmContextModelSnapshot : ModelSnapshot
+    [Migration("20260225110856_UpdatePayrollAndTimesheetForOtAndSalaryComponents")]
+    partial class UpdatePayrollAndTimesheetForOtAndSalaryComponents
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -763,7 +766,7 @@ namespace HRM_BE.Data.Migrations
                             Address = "Tân Lập-Yên Mỹ-Hưng Yên",
                             AvatarUrl = "/Image/Avatar/AvatarDefault.png",
                             BirthDay = new DateTime(2000, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified),
-                            ConcurrencyStamp = "56dbb0af-f2c4-4aae-8acf-50451823c2e1",
+                            ConcurrencyStamp = "451641b8-9401-42c7-a60e-ae91f3e4de54",
                             Email = "adminmaster@gmail.com",
                             EmailConfirmed = true,
                             EmployeeId = 1,
@@ -774,7 +777,7 @@ namespace HRM_BE.Data.Migrations
                             Name = "Admin-Master",
                             NormalizedEmail = "adminmaster@gmail.com",
                             NormalizedUserName = "adminmaster@gmail.com",
-                            PasswordHash = "AQAAAAIAAYagAAAAEJHT8KCU//9IXNbvsCHNym3uU2v14YMBgA7rFa28tgD992Xs5N2prQhlyECrQYdv6g==",
+                            PasswordHash = "AQAAAAIAAYagAAAAEAp8iP56EDulFgf7/xt8TqYEHYbP52O822xOvINwFKTB5vo9o7y0yMhqKVHHCY47Sw==",
                             PhoneNumber = "0988888888",
                             PhoneNumberConfirmed = false,
                             SecurityStamp = "",
@@ -1327,13 +1330,7 @@ namespace HRM_BE.Data.Migrations
                     b.Property<double?>("ActualWorkDays")
                         .HasColumnType("float");
 
-                    b.Property<decimal?>("AllowanceMealTravel")
-                        .HasColumnType("decimal(18,2)");
-
                     b.Property<decimal?>("BaseSalary")
-                        .HasColumnType("decimal(18,2)");
-
-                    b.Property<decimal?>("BhxhAmount")
                         .HasColumnType("decimal(18,2)");
 
                     b.Property<decimal?>("Bonus")
@@ -1386,12 +1383,6 @@ namespace HRM_BE.Data.Migrations
 
                     b.Property<int?>("OrganizationId")
                         .HasColumnType("int");
-
-                    b.Property<decimal?>("OvertimeAmount")
-                        .HasColumnType("decimal(18,2)");
-
-                    b.Property<decimal?>("ParkingAmount")
-                        .HasColumnType("decimal(18,2)");
 
                     b.Property<int?>("PayrollId")
                         .HasColumnType("int");

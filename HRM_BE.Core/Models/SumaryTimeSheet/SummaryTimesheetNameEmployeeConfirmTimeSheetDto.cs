@@ -1,4 +1,4 @@
-﻿using HRM_BE.Core.Data.Payroll_Timekeeping.TimekeepingRegulation;
+using HRM_BE.Core.Data.Payroll_Timekeeping.TimekeepingRegulation;
 using HRM_BE.Core.Data.Staff;
 using HRM_BE.Core.Models.DetailTimeSheet;
 using System;
@@ -43,6 +43,8 @@ namespace HRM_BE.Core.Models.SumaryTimeSheet
         public string? ShiftTableName { get; set; }
         public TimeKeepingLeaveStatus TimeKeepingLeaveStatus { get; set; }
         public bool? IsEnoughWork {  get; set; } =false; // có làm đủ công theo ca không
+        public bool IsOvertime { get; set; } // Ca làm thêm giờ (OT)
+        public double? OvertimeHours { get; set; } // Số giờ OT trong ca (giờ thô, chưa nhân hệ số)
     }
 
     public class ConfirmTimeSheetDto

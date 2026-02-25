@@ -1,4 +1,4 @@
-﻿using HRM_BE.Core.Data.Payroll_Timekeeping.Shift;
+using HRM_BE.Core.Data.Payroll_Timekeeping.Shift;
 using HRM_BE.Core.Models.DetailTimeSheet;
 using HRM_BE.Core.Models.Organization;
 using HRM_BE.Core.Models.Staff;
@@ -22,6 +22,7 @@ namespace HRM_BE.Core.Models.SumaryTimeSheet
         public double TotalLeaveDay { get; set; }
         public double DatePerMonth { get; set; }
         public double TotalHour { get; set; }
+        public double TotalOtHour { get; set; }
         public double EqualDay { get; set; }
         public double TotalExistLeaveDay { get; set; }
         public SummaryTimesheetNameEmployeeConfirmStatus Status { get; set; }
