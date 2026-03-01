@@ -788,6 +788,7 @@ namespace HRM_BE.Data.Repositories
 
             var payrollDetails = await _dbContext.PayrollDetails
                 .Where(p => request.PayrollDetailIds.Contains(p.Id))
+                .Include(p => p.Employee)
                 .ToListAsync();
 
             foreach (var payrollDetail in payrollDetails)

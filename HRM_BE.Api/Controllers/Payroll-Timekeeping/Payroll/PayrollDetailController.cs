@@ -2,9 +2,12 @@ using Azure.Core;
 using HRM_BE.Core.Data.Payroll_Timekeeping.Payroll;
 using HRM_BE.Core.ISeedWorks;
 using HRM_BE.Core.Models.Common;
+using HRM_BE.Core.Models.Mail;
 using HRM_BE.Core.Models.Payroll_Timekeeping.Payroll;
+using HRM_BE.Api.Services.Interfaces;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using System.Text;
 
 namespace HRM_BE.Api.Controllers.Payroll_Timekeeping.Payroll
 {
@@ -13,9 +16,12 @@ namespace HRM_BE.Api.Controllers.Payroll_Timekeeping.Payroll
     public class PayrollDetailController : ControllerBase
     {
         private readonly IUnitOfWork _unitOfWork;
-        public PayrollDetailController(IUnitOfWork unitOfWork)
+        private readonly IMailService _mailService;
+
+        public PayrollDetailController(IUnitOfWork unitOfWork, IMailService mailService)
         {
             _unitOfWork = unitOfWork;
+            _mailService = mailService;
         }
 
         /// <summary>
@@ -138,12 +144,86 @@ namespace HRM_BE.Api.Controllers.Payroll_Timekeeping.Payroll
             try
             {
                 await _unitOfWork.PayrollDetails.SendPayrollDetailConfirmation(request);
+
+                var firstDetail = await _unitOfWork.PayrollDetails.GetById(request.PayrollDetailIds[0]);
+                var payrollId = firstDetail.PayrollId;
+
+                var page = await _unitOfWork.PayrollDetails.Paging(
+                    organizationId: null,
+                    name: null,
+                    payrollId: payrollId,
+                    employeeId: null,
+                    sortBy: null,
+                    orderBy: null,
+                    pageIndex: 1,
+                    pageSize: int.MaxValue);
+
+                var detailsToSend = (page.Items ?? new List<PayrollDetailDto>())
+                    .Where(d => request.PayrollDetailIds.Contains(d.Id))
+                    .ToList();
+
+                foreach (var payrollDetail in detailsToSend)
+                {
+                    string? email = null;
+                    if (payrollDetail.EmployeeId.HasValue)
+                    {
+                        var employeeDto = await _unitOfWork.Employees.GetById(payrollDetail.EmployeeId.Value);
+                        email = employeeDto.CompanyEmail ?? employeeDto.AccountEmail ?? employeeDto.PersonalEmail;
+                    }
+
+                    if (string.IsNullOrWhiteSpace(email))
+                    {
+                        continue;
+                    }
+
+                    await _mailService.SendMail(new SendMailRequest
+                    {
+                        ToEmail = email,
+                        Subject = $"Phiếu lương - {payrollDetail.FullName}",
+                        Body = BuildPayrollDetailEmailBody(payrollDetail)
+                    });
+                }
+
                 return Ok(ApiResult<bool>.Success("Gửi xác nhận bảng lương thành công", true));
             }
             catch (Exception ex)
             {
                 return Ok(ApiResult<bool>.Failure(ex.Message, false));
             }
+        }
+
+        private static string BuildPayrollDetailEmailBody(PayrollDetailDto payrollDetail)
+        {
+            var sb = new StringBuilder();
+            sb.Append("<div style='font-family: Arial, sans-serif; font-size: 14px;'>");
+            sb.Append($"<p>Chào {System.Net.WebUtility.HtmlEncode(payrollDetail.FullName ?? "Anh/Chị")},</p>");
+            sb.Append("<p>Phiếu lương của Anh/Chị đã được gửi để xác nhận. Thông tin tóm tắt:</p>");
+
+            sb.Append("<table cellpadding='6' cellspacing='0' style='border-collapse: collapse; border: 1px solid #ddd;'>");
+            AppendRow(sb, "Mã nhân viên", payrollDetail.EmployeeCode);
+            AppendRow(sb, "Lương cơ bản", payrollDetail.BaseSalary);
+            AppendRow(sb, "Ngày công chuẩn", payrollDetail.StandardWorkDays);
+            AppendRow(sb, "Ngày công thực tế", payrollDetail.ActualWorkDays);
+            AppendRow(sb, "Lương theo công", payrollDetail.ReceivedSalary);
+            AppendRow(sb, "Lương KPI", payrollDetail.KpiSalary);
+            AppendRow(sb, "Thưởng", payrollDetail.Bonus);
+            AppendRow(sb, "Tổng lương", payrollDetail.TotalSalary);
+            AppendRow(sb, "Thực nhận", payrollDetail.TotalReceivedSalary);
+            AppendRow(sb, "Hạn phản hồi", payrollDetail.ResponseDeadline?.ToString("yyyy-MM-dd"));
+            sb.Append("</table>");
+
+            sb.Append("<p>Vui lòng đăng nhập hệ thống HRM để xem chi tiết và xác nhận phiếu lương.</p>");
+            sb.Append("<p>Trân trọng.</p>");
+            sb.Append("</div>");
+            return sb.ToString();
+        }
+
+        private static void AppendRow(StringBuilder sb, string label, object? value)
+        {
+            sb.Append("<tr>");
+            sb.Append($"<td style='border: 1px solid #ddd; font-weight: bold;'>{System.Net.WebUtility.HtmlEncode(label)}</td>");
+            sb.Append($"<td style='border: 1px solid #ddd;'>{System.Net.WebUtility.HtmlEncode(value?.ToString() ?? string.Empty)}</td>");
+            sb.Append("</tr>");
         }
 
         /// <summary>
