@@ -138,7 +138,8 @@ namespace HRM_BE.Data.Repositories
                     .Select(s => s.Date!.Value.Day)
                     .Distinct()
                     .Count(),
-                EqualDay = 0, // có thể dùng TotalHour/8 nếu cần ngày công quy đổi
+                // Nếu tính ngày công quy đổi: dùng giờ tiêu chuẩn (tối đa 8h/ngày) / 8, KHÔNG dùng TotalHour/8 (TotalHour gồm cả tăng ca; trùng với quy tắc PayrollDetail).
+                EqualDay = 0,
                 TotalExistLeaveDay = 0, // để mở rộng nếu cần tính số ngày phép tồn
                 Status = e.SummaryTimesheetNameEmployeeConfirms
                     .Where(s => s.SummaryTimesheetNameId == summaryTimeSheetId)
@@ -262,6 +263,7 @@ namespace HRM_BE.Data.Repositories
                     .Select(s => s.Date!.Value.Day)
                     .Distinct()
                     .Count(),
+                // EqualDay: nếu dùng sau này thì tính = tổng min(giờ/ngày, 8) / 8, không dùng TotalHour/8 (trùng quy tắc PayrollDetail).
                 EqualDay = 0,
                 TotalExistLeaveDay = 0,
                 Status = e.SummaryTimesheetNameEmployeeConfirms

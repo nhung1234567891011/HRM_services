@@ -97,6 +97,10 @@ namespace HRM_BE.Data.Repositories
             return payrollDetail;
         }
 
+        /// <summary>
+        /// Tính và lưu PayrollDetail cho từng nhân viên. ActualWorkDays (chỉ giờ tiêu chuẩn, tối đa 8h/ngày) và OvertimeAmount được tính từ timesheet trong tháng.
+        /// Khi dữ liệu chấm công thay đổi hoặc logic tính ngày công/OT thay đổi, cần gọi lại phương thức này cho kỳ lương tương ứng để cập nhật.
+        /// </summary>
         public async Task CalculateAndSavePayrollDetails(int payrollId)
         {
             // Lấy Payroll
@@ -156,7 +160,8 @@ namespace HRM_BE.Data.Repositories
                     .Distinct()
                     .Count();
 
-                // Ngày công thực tế (quy đổi theo giờ làm, tối đa 8h/ngày)
+                // Ngày công thực tế = quy đổi từ giờ làm tiêu chuẩn (tối đa 8h/ngày), KHÔNG bao gồm giờ tăng ca.
+                // Giờ tăng ca được tính riêng trong OvertimeAmount (hệ số 200%). Mỗi ngày: chỉ phần <= 8h vào ngày công, phần > 8h vào OT.
                 var normalHoursTotal = employeeTimesheetsInPeriod
                     .GroupBy(t => t.Date!.Value.Date)
                     .Sum(g =>
@@ -202,7 +207,7 @@ namespace HRM_BE.Data.Repositories
                     receivedSalary: receivedSalary,
                     attendanceDays: attendanceDays);
 
-                // Tính giờ OT thô theo ngày: tổng giờ làm trong ngày vượt quá 8h (đã trừ nghỉ trưa trong NumberOfWorkingHour nếu có)
+                // Giờ tăng ca: cùng totalHoursInDay như trên; phần ≤ 8h đã tính vào ngày công (normalHoursTotal), phần > 8h là OT.
                 var rawOtMinutes = employeeTimesheetsInPeriod
                     .GroupBy(t => t.Date!.Value.Date)
                     .Sum(g =>
