@@ -81,7 +81,9 @@ namespace HRM_BE.Core.Data.Payroll_Timekeeping.Payroll
         public decimal? AllowanceMealTravel { get; set; } // Phụ cấp đi lại, ăn trưa
         public decimal? ParkingAmount { get; set; } // Tiền gửi xe công ty
         public decimal? OvertimeAmount { get; set; } // Lương tăng ca
-        public decimal? BhxhAmount { get; set; } // BHXH phải trừ
+        public decimal? CommissionAmount { get; set; } // Hoa hồng doanh thu
+        public decimal? BhxhAmount { get; set; } // BHXH (+ BHTN + BHYT gộp chung) phải trừ
+        public decimal? UnionFeeAmount { get; set; } // Quỹ công đoàn
 
         public decimal? TotalSalary { get; set; } // Tổng lương
         public decimal? TotalReceivedSalary { get; set; } // Tổng lương thực nhận

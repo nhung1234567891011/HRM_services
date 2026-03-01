@@ -1,4 +1,4 @@
-﻿using AutoMapper;
+using AutoMapper;
 using HRM_BE.Core.Data.Payroll_Timekeeping.LeaveRegulation;
 using HRM_BE.Core.Data.Payroll_Timekeeping.Payroll;
 using HRM_BE.Core.Exceptions;
@@ -36,6 +36,7 @@ namespace HRM_BE.Data.Repositories
                 ComponentCode = "TI_LE_HUONG_LUONG",
                 Nature = Nature.Other,
                 Characteristic = Characteristic.Fixed,
+                CalcType = SalaryComponentCalcType.FixedAmount,
                 Description = "Tỉ lệ hưởng lương theo quy định của công ty"
             },
             new SalaryComponent
@@ -44,6 +45,7 @@ namespace HRM_BE.Data.Repositories
                 ComponentCode = "NGAY_CONG_CHUAN",
                 Nature = Nature.Other,
                 Characteristic = Characteristic.Fixed,
+                CalcType = SalaryComponentCalcType.FixedAmount,
                 Description = "Số ngày công chuẩn trong tháng"
             },
             new SalaryComponent
@@ -52,6 +54,7 @@ namespace HRM_BE.Data.Repositories
                 ComponentCode = "NGAY_CONG_THUC_TE",
                 Nature = Nature.Other,
                 Characteristic = Characteristic.Fixed,
+                CalcType = SalaryComponentCalcType.FixedAmount,
                 Description = "Số ngày công thực tế trong tháng"
             },
             new SalaryComponent
@@ -60,6 +63,7 @@ namespace HRM_BE.Data.Repositories
                 ComponentCode = "KPI_DAT",
                 Nature = Nature.Other,
                 Characteristic = Characteristic.Fixed,
+                CalcType = SalaryComponentCalcType.FixedAmount,
                 Description = "Thưởng KPI đạt theo từng tháng"
             },
             new SalaryComponent
@@ -68,6 +72,7 @@ namespace HRM_BE.Data.Repositories
                 ComponentCode = "LUONG_KPI",
                 Nature = Nature.Earning,
                 Characteristic = Characteristic.Fixed,
+                CalcType = SalaryComponentCalcType.FixedAmount,
                 Description = "Lương KPI theo từng tháng"
             },
             new SalaryComponent
@@ -76,6 +81,7 @@ namespace HRM_BE.Data.Repositories
                 ComponentCode = "LUONG_THUONG",
                 Nature = Nature.Earning,
                 Characteristic = Characteristic.Fixed,
+                CalcType = SalaryComponentCalcType.FixedAmount,
                 Description = "Lương thưởng theo từng tháng"
             },
             new SalaryComponent
@@ -84,7 +90,29 @@ namespace HRM_BE.Data.Repositories
                 ComponentCode = "BHXH",
                 Nature = Nature.Deduction,
                 Characteristic = Characteristic.Fixed,
-                Description = "Bảo hiểm xã hội"
+                CalcType = SalaryComponentCalcType.PercentOfBase,
+                BaseSource = SalaryComponentBaseSource.ContractSalaryInsurance,
+                Description = "Khấu trừ BHXH (8% lương đóng BH)"
+            },
+            new SalaryComponent
+            {
+                ComponentName = "BHTN",
+                ComponentCode = "BHTN",
+                Nature = Nature.Deduction,
+                Characteristic = Characteristic.Fixed,
+                CalcType = SalaryComponentCalcType.PercentOfBase,
+                BaseSource = SalaryComponentBaseSource.ContractSalaryInsurance,
+                Description = "Khấu trừ BHTN (1% lương đóng BH)"
+            },
+            new SalaryComponent
+            {
+                ComponentName = "BHYT",
+                ComponentCode = "BHYT",
+                Nature = Nature.Deduction,
+                Characteristic = Characteristic.Fixed,
+                CalcType = SalaryComponentCalcType.PercentOfBase,
+                BaseSource = SalaryComponentBaseSource.ContractSalaryInsurance,
+                Description = "Khấu trừ BHYT (1.5% lương đóng BH)"
             },
             new SalaryComponent
             {
@@ -92,6 +120,8 @@ namespace HRM_BE.Data.Repositories
                 ComponentCode = "QUY_CONG_DOAN",
                 Nature = Nature.Deduction,
                 Characteristic = Characteristic.Fixed,
+                CalcType = SalaryComponentCalcType.PercentOfBase,
+                BaseSource = SalaryComponentBaseSource.ContractSalaryInsurance,
                 Description = "Quỹ công đoàn"
             }
         };

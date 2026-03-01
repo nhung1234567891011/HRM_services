@@ -35,7 +35,8 @@ namespace HRM_BE.Core.Models.Payroll_Timekeeping.Payroll
         public decimal? AllowanceMealTravel { get; set; } // Phụ cấp đi lại, ăn trưa
         public decimal? ParkingAmount { get; set; } // Tiền gửi xe công ty
         public decimal? OvertimeAmount { get; set; } // Lương tăng ca
-        public decimal? BhxhAmount { get; set; } // BHXH phải trừ
+        public decimal? CommissionAmount { get; set; } // Hoa hồng doanh thu
+        public decimal? BhxhAmount { get; set; } // BHXH (+ BHTN + BHYT gộp) phải trừ
 
         public decimal? TotalSalary { get; set; } // Tổng lương
         public decimal? TotalReceivedSalary { get; set; } // Tổng lương thực nhận
@@ -44,5 +45,14 @@ namespace HRM_BE.Core.Models.Payroll_Timekeeping.Payroll
         public DateTime? ConfirmationDate { get; set; } // Thời gian nhân viên xác nhận bảng lương
 
         public List<DeductionDto>? Deductions { get; set; } // Danh sách các khoản khấu trừ
+
+        /// <summary>BHXH (alias cho FE - bằng BhxhAmount).</summary>
+        public decimal? SocialInsurance { get; set; }
+        /// <summary>Phụ cấp đi lại ăn trưa + Tiền gửi xe (cho FE).</summary>
+        public decimal? TotalAllowance { get; set; }
+        /// <summary>Tổng khấu trừ theo nhân viên (cho FE).</summary>
+        public decimal? TotalDeduction { get; set; }
+        /// <summary>Quỹ công đoàn (mặc định 0 nếu chưa dùng).</summary>
+        public decimal? UnionFee { get; set; }
     }
 }

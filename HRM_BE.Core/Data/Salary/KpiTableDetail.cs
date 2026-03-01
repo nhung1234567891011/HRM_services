@@ -15,6 +15,7 @@ namespace HRM_BE.Core.Data.Salary
         public string? EmployeeName { get; set; }
         public double? CompletionRate { get; set; }
         public double? Bonus { get; set; }
+        public decimal? Revenue { get; set; }
 
         public virtual KpiTable? KpiTable { get; set; }
         public virtual Employee? Employee { get; set; }

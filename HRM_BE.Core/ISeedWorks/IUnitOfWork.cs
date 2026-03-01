@@ -1,4 +1,4 @@
-﻿
+
 using HRM_BE.Core.IRepositories;
 using HRM_BE.Data.Repositories;
 
@@ -14,6 +14,7 @@ namespace HRM_BE.Core.ISeedWorks
         public IPayrollRepository Payrolls{ get; }
         public IPayrollDetailRepository PayrollDetails { get; }
         public IPayrollInquiryRepository PayrollInquiries { get; }
+        public IRevenueCommissionPolicyRepository RevenueCommissionPolicies { get; }
 
         public IPrefixConfigRepository PrefixConfigs { get; }
         public IBannerRepository Banners { get; }

@@ -1,4 +1,4 @@
-﻿using AutoMapper;
+using AutoMapper;
 using HRM_BE.Core.Data.Company;
 using HRM_BE.Core.Data.Salary;
 using HRM_BE.Core.Exceptions;
@@ -32,7 +32,10 @@ namespace HRM_BE.Data.Repositories
 
         public async Task<PagingResult<KpiTableDetailDto>> Paging(GetKpiTableDetailRequest request, string? sortBy, string? orderBy, int pageIndex = 1, int pageSize = 10)
         {
-            var query = _dbContext.KpiTableDetails.Include(e=> e.Employee).AsNoTracking();
+            var query = _dbContext.KpiTableDetails
+                .Include(e => e.Employee)
+                .ThenInclude(e => e.StaffPosition)
+                .AsNoTracking();
             if (request.KpiTableId.HasValue)
             {
                 query = query.Where(c => c.KpiTableId == request.KpiTableId);

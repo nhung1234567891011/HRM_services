@@ -1,4 +1,4 @@
-﻿using HRM_BE.Core.Data.Identity;
+using HRM_BE.Core.Data.Identity;
 using HRM_BE.Core.IRepositories;
 using HRM_BE.Core.ISeedWorks;
 using HRM_BE.Data.Repositories;
@@ -70,6 +70,7 @@ namespace HRM_BE.Data.SeedWorks
             Payrolls = new PayrollRepository(context, mapper, httpContextAccessor);
             PayrollDetails = new PayrollDetailRepository(context, mapper, httpContextAccessor);
             PayrollInquiries = new PayrollInquiryRepository(context, mapper, httpContextAccessor);
+            RevenueCommissionPolicies = new RevenueCommissionPolicyRepository(context, mapper, httpContextAccessor);
             Departments=new DepartmentRepository(context, mapper, httpContextAccessor);
             Projects=new ProjectRepository(context, mapper,httpContextAccessor);
             Delegations = new DelegationRepository(context, mapper, httpContextAccessor);
@@ -88,6 +89,7 @@ namespace HRM_BE.Data.SeedWorks
         public IPayrollRepository Payrolls { get; private set; }
         public IPayrollDetailRepository PayrollDetails { get; private set; }
         public IPayrollInquiryRepository PayrollInquiries { get; private set; }
+        public IRevenueCommissionPolicyRepository RevenueCommissionPolicies { get; private set; }
         public ISalaryComponentRepository SalaryComponents { get; private set; }
         public IKpiTableRepository KpiTables { get; private set; }
         public IKpiTableDetailRepository KpiTableDetails { get; private set; }

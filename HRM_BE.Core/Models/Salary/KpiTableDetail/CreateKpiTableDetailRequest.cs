@@ -14,5 +14,6 @@ namespace HRM_BE.Core.Models.Salary.KpiTableDetail
         public string? EmployeeName { get; set; }
         public double? CompletionRate { get; set; }
         public double? Bonus { get; set; }
+        public decimal? Revenue { get; set; }
     }
 }

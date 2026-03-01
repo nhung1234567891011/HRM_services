@@ -115,6 +115,12 @@ namespace HRM_BE.Api.Services
         public async Task UpdateExpireContractStatus(int contractId)
         {
             var entity = await _dbContext.Contracts.FindAsync(contractId);
+            if (entity is null)
+            {
+                // log and exit; contract no longer exists
+                return;
+            }
+
             entity.ExpiredStatus = true;
             await _dbContext.SaveChangesAsync();
         }

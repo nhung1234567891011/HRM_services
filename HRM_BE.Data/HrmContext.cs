@@ -1,4 +1,4 @@
-﻿using HRM_BE.Core.Constants.System;
+using HRM_BE.Core.Constants.System;
 using HRM_BE.Core.Data;
 using HRM_BE.Core.Data.Address;
 using HRM_BE.Core.Data.Company;
@@ -89,6 +89,8 @@ namespace HRM_BE.Data
         public virtual DbSet<PayrollStaffPosition> PayrollStaffPositions { get; set; }
         public virtual DbSet<PayrollDetail> PayrollDetails { get; set; } = null!;
         public virtual DbSet<PayrollInquiry> PayrollInquiries { get; set; } = null!;
+        public virtual DbSet<RevenueCommissionPolicy> RevenueCommissionPolicies { get; set; } = null!;
+        public virtual DbSet<RevenueCommissionTier> RevenueCommissionTiers { get; set; } = null!;
 
         //shift
         public virtual DbSet<DetailTimesheetName> DetailTimesheetNames { get; set; } = null!;
@@ -226,6 +228,10 @@ namespace HRM_BE.Data
                 .HasQueryFilter(s => s.IsDeleted == false);
             builder.Entity<GroupWork>()
              .HasQueryFilter(s => s.IsDeleted == false);
+            builder.Entity<RevenueCommissionPolicy>()
+                .HasQueryFilter(s => s.IsDeleted == false);
+            builder.Entity<RevenueCommissionTier>()
+                .HasQueryFilter(s => s.IsDeleted == false);
             // Cấu hình Global Query Filter để tự động loại bỏ bản ghi có IsDeleted = true
             builder.Entity<Organization>()
                 .HasQueryFilter(o => o.IsDeleted == false);  // Lọc các bản ghi có IsDeleted = false
@@ -338,6 +344,12 @@ namespace HRM_BE.Data
                 .HasMany(p => p.PayrollDetails)
                 .WithOne(pd => pd.Payroll)
                 .HasForeignKey(pd => pd.PayrollId);
+
+            builder.Entity<RevenueCommissionPolicy>()
+                .HasMany(p => p.Tiers)
+                .WithOne(t => t.Policy)
+                .HasForeignKey(t => t.PolicyId)
+                .OnDelete(DeleteBehavior.Cascade);
 
 
             // Sprint 4 Công việc HRM
