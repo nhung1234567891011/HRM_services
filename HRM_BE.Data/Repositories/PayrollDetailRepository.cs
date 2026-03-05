@@ -1,5 +1,6 @@
 using AutoMapper;
 using HRM_BE.Core.Data.Payroll_Timekeeping.Payroll;
+using HRM_BE.Core.Data.Payroll_Timekeeping.Shift;
 using HRM_BE.Core.Data.Profile;
 using HRM_BE.Core.Exceptions;
 using HRM_BE.Core.Extension;
@@ -35,15 +36,34 @@ namespace HRM_BE.Data.Repositories
 
         public async Task<PagingResult<PayrollDetailDto>> Paging(int? organizationId, string? name, int? payrollId, int? employeeId, string? sortBy, string? orderBy, int pageIndex = 1, int pageSize = 10)
         {
+            // Lấy SummaryTimesheetNameIds liên kết với payroll (nếu có) để kiểm tra xác nhận
+            List<int?> summaryTimesheetNameIds = new List<int?>();
+            if (payrollId.HasValue)
+            {
+                summaryTimesheetNameIds = _dbContext.PayrollSummaryTimesheets
+                    .Where(pst => pst.PayrollId == payrollId)
+                    .Select(pst => pst.SummaryTimesheetNameId)
+                    .ToList();
+            }
+
+            var now = DateTime.Now;
+
             var query = _dbContext.PayrollDetails
                 .Where(p => p.IsDeleted != true)
+                // Hợp đồng còn hạn
+                .Where(p => p.Employee.Contracts.Any(c => c.ExpiredStatus == false))
+                // Đã xác nhận bảng chấm công HOẶC quá ngày xác nhận
+                .Where(p => !summaryTimesheetNameIds.Any() ||
+                    p.Employee.SummaryTimesheetNameEmployeeConfirms.Any(s =>
+                        summaryTimesheetNameIds.Contains(s.SummaryTimesheetNameId) &&
+                        (s.Status == SummaryTimesheetNameEmployeeConfirmStatus.Confirm ||
+                         (s.Date != null && s.Date < now))))
                 .Include(p => p.Employee)
                 .ThenInclude(e => e.Deductions)
                 .AsQueryable();
 
             if (payrollId.HasValue)
             {
-
                 query = query.Where(p => p.PayrollId == payrollId);
             }
 
@@ -112,10 +132,26 @@ namespace HRM_BE.Data.Repositories
 
             var payrollMonth = payroll.CreatedAt ?? DateTime.Now;
 
+            // Lấy danh sách SummaryTimesheetNameId liên kết với Payroll này
+            var summaryTimesheetNameIds = _dbContext.PayrollSummaryTimesheets
+                .Where(pst => pst.PayrollId == payrollId)
+                .Select(pst => pst.SummaryTimesheetNameId)
+                .ToList();
+
+            var now = DateTime.Now;
+
             // 1. Lấy danh sách nhân viên thuộc tổ chức của Payroll
+            // Điều kiện:
+            //   - Có hợp đồng còn hạn (ExpiredStatus == false)
+            //   - Đã xác nhận bảng chấm công tổng hợp (Status == Confirm)
+            //     HOẶC đã quá ngày xác nhận (Date < now)
             var employees = _dbContext.Employees
                 .Where(e => e.OrganizationId == payroll.OrganizationId)
-                .Where(e => e.Contracts.Any(c => c.EmployeeId == e.Id))
+                .Where(e => e.Contracts.Any(c => c.EmployeeId == e.Id && c.ExpiredStatus == false))
+                .Where(e => e.SummaryTimesheetNameEmployeeConfirms.Any(s =>
+                    summaryTimesheetNameIds.Contains(s.SummaryTimesheetNameId) &&
+                    (s.Status == SummaryTimesheetNameEmployeeConfirmStatus.Confirm ||
+                     (s.Date != null && s.Date < now))))
                 .Include(e => e.StaffPosition)
                 .ToList();
 
@@ -127,7 +163,7 @@ namespace HRM_BE.Data.Repositories
 
             foreach (var employee in employees)
             {
-                var contract = _dbContext.Contracts.FirstOrDefault(c => c.EmployeeId == employee.Id);
+                var contract = _dbContext.Contracts.FirstOrDefault(c => c.EmployeeId == employee.Id && c.ExpiredStatus == false);
                 var timesheet = _dbContext.Timesheets.Where(t => t.EmployeeId == employee.Id);
 
                 var employeeTimesheetsInPeriod = timesheet
@@ -170,7 +206,7 @@ namespace HRM_BE.Data.Repositories
                         return Math.Min(totalHoursInDay, 8m);
                     });
 
-                var actualWorkDaysForSalary = normalHoursTotal / 8m;
+                var actualWorkDaysForSalary = attendanceDays;
 
                 var receivedSalary = standardWorkDays > 0 ? (baseSalary / (decimal)standardWorkDays) * actualWorkDaysForSalary : 0;
                 var kpi = contract?.KpiSalary ?? 0;
@@ -239,14 +275,18 @@ namespace HRM_BE.Data.Repositories
                     payrollDate);
 
                 // BHXH: 100% từ Salary Component (ComponentCode = "BHXH"), thường % lương đóng BH
-                var bhxhAmount = ResolveSalaryComponentWithRule(
-                    organizationIdForComponent,
-                    "BHXH",
-                    defaultValue: 0m,
-                    contractSalaryAmount: baseSalary,
-                    contractSalaryInsurance: contract?.SalaryInsurance ?? baseSalary,
-                    receivedSalary: receivedSalary,
-                    attendanceDays: attendanceDays);
+                //var bhxhAmount = ResolveSalaryComponentWithRule(
+                //    organizationIdForComponent,
+                //    "BHXH",
+                //    defaultValue: 0m,
+                //    contractSalaryAmount: baseSalary,
+                //    contractSalaryInsurance: contract?.SalaryInsurance ?? baseSalary,
+                //    receivedSalary: receivedSalary,
+                //    attendanceDays: attendanceDays);
+
+                var bhxhAmount = (contract?.SalaryInsurance ?? 0m) > 0m
+                    ? contract!.SalaryInsurance!.Value
+                    : baseSalary;
 
                 // BHTN: 100% từ Salary Component (ComponentCode = "BHTN")
                 var bhtnAmount = ResolveSalaryComponentWithRule(

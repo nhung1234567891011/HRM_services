@@ -26,6 +26,7 @@ namespace HRM_BE.Core.Models.SumaryTimeSheet
         public double EqualDay { get; set; }
         public double TotalExistLeaveDay { get; set; }
         public SummaryTimesheetNameEmployeeConfirmStatus Status { get; set; }
+        public DateTime? ConfirmDate { get; set; }
         public DateTime StartDate { get; set; }
         public DateTime EndDate { get; set; }
     }

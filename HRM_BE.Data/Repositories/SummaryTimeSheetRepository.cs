@@ -145,6 +145,10 @@ namespace HRM_BE.Data.Repositories
                     .Where(s => s.SummaryTimesheetNameId == summaryTimeSheetId)
                     .Select(s => s.Status ?? SummaryTimesheetNameEmployeeConfirmStatus.None)
                     .FirstOrDefault(),
+                ConfirmDate = e.SummaryTimesheetNameEmployeeConfirms
+                    .Where(s => s.SummaryTimesheetNameId == summaryTimeSheetId)
+                    .Select(s => s.Date)
+                    .FirstOrDefault(),
                 StaffPosition = new GetDetailTimeSheetStaffPositionDto
                 {
                     Id = e.StaffPosition.Id,
@@ -269,6 +273,10 @@ namespace HRM_BE.Data.Repositories
                 Status = e.SummaryTimesheetNameEmployeeConfirms
                     .Where(s => s.SummaryTimesheetNameId == summaryTimeSheetId)
                     .Select(s => s.Status ?? SummaryTimesheetNameEmployeeConfirmStatus.None)
+                    .FirstOrDefault(),
+                ConfirmDate = e.SummaryTimesheetNameEmployeeConfirms
+                    .Where(s => s.SummaryTimesheetNameId == summaryTimeSheetId)
+                    .Select(s => s.Date)
                     .FirstOrDefault(),
                 StaffPosition = new GetDetailTimeSheetStaffPositionDto
                 {
