@@ -49,34 +49,28 @@ namespace HRM_BE.Api.Services
             {
                 var permissions = await GetRecursive(null);
 
-                if (!string.IsNullOrWhiteSpace(request.Name) ||
-                    !string.IsNullOrWhiteSpace(request.DisplayName) ||
-                    !string.IsNullOrWhiteSpace(request.Description) ||
+                if (!string.IsNullOrWhiteSpace(request.Keyword) ||
                     request.Section.HasValue)
                 {
-                    var nameFilter = request.Name?.Trim();
-                    var displayNameFilter = request.DisplayName?.Trim();
-                    var descriptionFilter = request.Description?.Trim();
+                    // Keyword chung: ưu tiên Name, rồi DisplayName, rồi Description
+                    var keyword = request.Keyword?.Trim();
+                    var hasKeyword = !string.IsNullOrWhiteSpace(keyword);
                     var sectionFilter = request.Section;
 
                     bool Match(PermissionDto p)
                     {
                         if (p == null) return false;
 
-                        if (!string.IsNullOrEmpty(nameFilter) &&
-                            (string.IsNullOrEmpty(p.Name) ||
-                             !p.Name.Contains(nameFilter, StringComparison.OrdinalIgnoreCase)))
-                            return false;
+                        // Nếu có keyword thì check trên 3 trường: Name, DisplayName, Description
+                        var isKeywordMatch = !hasKeyword ||
+                                             (!string.IsNullOrEmpty(p.Name) &&
+                                              p.Name.Contains(keyword, StringComparison.OrdinalIgnoreCase)) ||
+                                             (!string.IsNullOrEmpty(p.DisplayName) &&
+                                              p.DisplayName.Contains(keyword, StringComparison.OrdinalIgnoreCase)) ||
+                                             (!string.IsNullOrEmpty(p.Description) &&
+                                              p.Description.Contains(keyword, StringComparison.OrdinalIgnoreCase));
 
-                        if (!string.IsNullOrEmpty(displayNameFilter) &&
-                            (string.IsNullOrEmpty(p.DisplayName) ||
-                             !p.DisplayName.Contains(displayNameFilter, StringComparison.OrdinalIgnoreCase)))
-                            return false;
-
-                        if (!string.IsNullOrEmpty(descriptionFilter) &&
-                            (string.IsNullOrEmpty(p.Description) ||
-                             !p.Description.Contains(descriptionFilter, StringComparison.OrdinalIgnoreCase)))
-                            return false;
+                        if (!isKeywordMatch) return false;
 
                         if (sectionFilter.HasValue && p.Section != sectionFilter)
                             return false;
@@ -96,6 +90,7 @@ namespace HRM_BE.Api.Services
                             node.Childrens = filteredChildren;
                             result.Add(node);
                         }
+
                         return result;
                     }
 
@@ -129,7 +124,8 @@ namespace HRM_BE.Api.Services
                     .Take(request.PageSize)
                     .ToList();
 
-                var result = new PagingResult<PermissionDto>(items, request.PageIndex, request.PageSize, request.SortBy, request.OrderBy, total);
+                var result = new PagingResult<PermissionDto>(items, request.PageIndex, request.PageSize, request.SortBy,
+                    request.OrderBy, total);
 
                 return result;
             }
