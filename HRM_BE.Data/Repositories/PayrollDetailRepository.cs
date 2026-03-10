@@ -16,6 +16,7 @@ using System.Globalization;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using HRM_BE.Core.Data.Payroll_Timekeeping.TimekeepingRegulation;
 
 namespace HRM_BE.Data.Repositories
 {
@@ -130,13 +131,40 @@ namespace HRM_BE.Data.Repositories
                 throw new Exception($"Payroll có Id = {payrollId} không tồn tại!");
             }
 
-            var payrollMonth = payroll.CreatedAt ?? DateTime.Now;
-
             // Lấy danh sách SummaryTimesheetNameId liên kết với Payroll này
             var summaryTimesheetNameIds = _dbContext.PayrollSummaryTimesheets
                 .Where(pst => pst.PayrollId == payrollId)
                 .Select(pst => pst.SummaryTimesheetNameId)
                 .ToList();
+
+            // Xác định khoảng thời gian kỳ lương dựa trên các bảng công tổng hợp đã gắn với Payroll.
+            // Nếu không có bảng công nào, fallback về tháng/năm của CreatedAt như cũ.
+            DateTime periodStartDate;
+            DateTime periodEndDate;
+
+            if (summaryTimesheetNameIds.Any())
+            {
+                var period = _dbContext.SummaryTimesheetNames
+                    .Where(s => summaryTimesheetNameIds.Contains(s.Id))
+                    .Select(s => new
+                    {
+                        MinStartDate = s.SummaryTimesheetNameDetailTimesheetNames
+                            .Min(d => d.DetailTimesheetName.StartDate),
+                        MaxEndDate = s.SummaryTimesheetNameDetailTimesheetNames
+                            .Max(d => d.DetailTimesheetName.EndDate)
+                    })
+                    .FirstOrDefault();
+
+                var fallback = payroll.CreatedAt ?? DateTime.Now;
+                periodStartDate = (period?.MinStartDate ?? fallback).Date;
+                periodEndDate = (period?.MaxEndDate ?? fallback).Date;
+            }
+            else
+            {
+                var payrollMonth = payroll.CreatedAt ?? DateTime.Now;
+                periodStartDate = new DateTime(payrollMonth.Year, payrollMonth.Month, 1);
+                periodEndDate = periodStartDate.AddMonths(1).AddDays(-1);
+            }
 
             var now = DateTime.Now;
 
@@ -169,19 +197,18 @@ namespace HRM_BE.Data.Repositories
                 var employeeTimesheetsInPeriod = timesheet
                     .Where(t => t.IsDeleted != true
                                 && t.Date.HasValue
-                                && t.Date.Value.Month == payrollMonth.Month
-                                && t.Date.Value.Year == payrollMonth.Year
-                                && t.NumberOfWorkingHour.HasValue)
+                                && t.Date.Value.Date >= periodStartDate
+                                && t.Date.Value.Date <= periodEndDate)
                     .ToList();
 
-                // Lấy bảng KpiDetail theo tháng hiện tại
+                // Lấy bảng KpiDetail theo kỳ lương (theo khoảng ngày periodStartDate/periodEndDate)
                 var kpiDetail = _dbContext.KpiTableDetails.Include(k => k.KpiTable)
                     .FirstOrDefault(k =>
                         k.EmployeeId == employee.Id &&
                         k.KpiTable != null &&
                         k.KpiTable.ToDate.HasValue &&
-                        k.KpiTable.ToDate.Value.Month == payrollMonth.Month &&
-                        k.KpiTable.ToDate.Value.Year == payrollMonth.Year);
+                        k.KpiTable.ToDate.Value.Date >= periodStartDate &&
+                        k.KpiTable.ToDate.Value.Date <= periodEndDate);
 
                 // Lấy các khoản khấu trừ
                 var deductions = _dbContext.Deductions.Where(d => d.EmployeeId == employee.Id).ToList();
@@ -190,13 +217,37 @@ namespace HRM_BE.Data.Repositories
                 // 2. Tính toán các thành phần lương
                 var baseSalary = contract?.SalaryAmount ?? 0;
 
-                // Số ngày đi làm (phục vụ phụ cấp theo ngày như gửi xe)
-                var attendanceDays = employeeTimesheetsInPeriod
+                // Số ngày đi làm thực tế (chỉ các ngày có chấm công đi làm bình thường, dùng cho phụ cấp theo ngày như gửi xe)
+                var workingDayDates = employeeTimesheetsInPeriod
+                    .Where(t =>
+                        t.TimeKeepingLeaveStatus == TimeKeepingLeaveStatus.None &&
+                        (
+                            (t.NumberOfWorkingHour ?? 0) > 0
+                            // Trường hợp quên chấm ra: vẫn coi là có đi làm nếu có check-in (StartTime) trong ngày
+                            || (t.NumberOfWorkingHour == null && t.StartTime.HasValue)
+                        ))
                     .Select(t => t.Date!.Value.Date)
                     .Distinct()
+                    .ToList();
+
+                // Các ngày nghỉ nhưng vẫn được hưởng lương (ví dụ nghỉ lễ Tết có lương)
+                var paidLeaveWithSalaryDates = employeeTimesheetsInPeriod
+                    .Where(t =>
+                        t.TimeKeepingLeaveStatus == TimeKeepingLeaveStatus.LeaveNotPermissionWithSalary)
+                    .Select(t => t.Date!.Value.Date)
+                    .Distinct()
+                    .ToList();
+
+                // attendanceDays: chỉ tính những ngày thật sự đi làm (không bao gồm ngày nghỉ hưởng lương)
+                var attendanceDays = workingDayDates.Count;
+
+                // ActualWorkDays dùng cho hiển thị/ngày công thực tế: chỉ bao gồm ngày thực sự đi làm (giống SummaryTimeSheet.TotalWorkingDay).
+                // Riêng lương (ReceivedSalary) vẫn tính theo cả ngày làm + ngày nghỉ nhưng được hưởng lương.
+                var actualWorkDaysForSalary = workingDayDates
+                    .Union(paidLeaveWithSalaryDates)
                     .Count();
 
-                // Ngày công thực tế = quy đổi từ giờ làm tiêu chuẩn (tối đa 8h/ngày), KHÔNG bao gồm giờ tăng ca.
+                // Ngày công quy đổi từ giờ làm tiêu chuẩn (tối đa 8h/ngày), KHÔNG bao gồm giờ tăng ca.
                 // Giờ tăng ca được tính riêng trong OvertimeAmount (hệ số 200%). Mỗi ngày: chỉ phần <= 8h vào ngày công, phần > 8h vào OT.
                 var normalHoursTotal = employeeTimesheetsInPeriod
                     .GroupBy(t => t.Date!.Value.Date)
@@ -205,8 +256,6 @@ namespace HRM_BE.Data.Repositories
                         var totalHoursInDay = g.Sum(x => (decimal)(x.NumberOfWorkingHour ?? 0));
                         return Math.Min(totalHoursInDay, 8m);
                     });
-
-                var actualWorkDaysForSalary = attendanceDays;
 
                 var receivedSalary = standardWorkDays > 0 ? (baseSalary / (decimal)standardWorkDays) * actualWorkDaysForSalary : 0;
                 var kpi = contract?.KpiSalary ?? 0;
@@ -267,7 +316,7 @@ namespace HRM_BE.Data.Repositories
 
                 // Hoa hồng doanh thu (cấu hình theo bậc)
                 var revenue = kpiDetail?.Revenue ?? 0m;
-                var payrollDate = payrollMonth;
+                var payrollDate = periodEndDate;
                 var commissionAmount = ResolveRevenueCommissionAmount(
                     organizationIdForComponent,
                     employee?.StaffPosition?.PositionCode,
@@ -342,7 +391,8 @@ namespace HRM_BE.Data.Repositories
                     ContractTypeStatus = contract?.ContractTypeStatus ?? ContractTypeStatus.Official,
                     BaseSalary = baseSalary,
                     StandardWorkDays = standardWorkDays,
-                    ActualWorkDays = (double)actualWorkDaysForSalary,
+                    // Ngày công thực tế hiển thị trên phiếu lương: đồng bộ với SummaryTimeSheet.TotalWorkingDay
+                    ActualWorkDays = (double)attendanceDays,
                     ReceivedSalary = receivedSalary,
                     KPI = (decimal)kpi,
                     KpiPercentage = (decimal)kpiPercentage,

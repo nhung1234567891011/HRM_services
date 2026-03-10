@@ -107,7 +107,11 @@ namespace HRM_BE.Data.Repositories
                                 && t.Date.Value.Date >= periodTime.minStartDate.Value.Date
                                 && t.Date.Value.Date <= periodTime.maxEndDate.Value.Date
                                 && t.TimeKeepingLeaveStatus == TimeKeepingLeaveStatus.None
-                                && (t.NumberOfWorkingHour ?? 0) > 0)
+                                && (
+                                       (t.NumberOfWorkingHour ?? 0) > 0
+                                       // Trường hợp quên chấm ra: vẫn coi là có đi làm nếu có check-in (StartTime) trong ngày
+                                       || (t.NumberOfWorkingHour == null && t.StartTime.HasValue)
+                                   ))
                     .Select(t => t.Date!.Value.Date)
                     .Distinct()
                     .Count(),
@@ -134,7 +138,9 @@ namespace HRM_BE.Data.Repositories
                     .Where(t => t.IsDeleted != true
                                 && t.Date.HasValue
                                 && t.Date.Value.Date >= periodTime.minStartDate.Value.Date
-                                && t.Date.Value.Date <= periodTime.maxEndDate.Value.Date)
+                                && t.Date.Value.Date <= periodTime.maxEndDate.Value.Date
+                                && t.NumberOfWorkingHour.HasValue
+                                )
                     .Select(s => s.Date!.Value.Day)
                     .Distinct()
                     .Count(),
@@ -236,7 +242,10 @@ namespace HRM_BE.Data.Repositories
                                 && t.Date.Value.Date >= periodTime.minStartDate.Value.Date
                                 && t.Date.Value.Date <= periodTime.maxEndDate.Value.Date
                                 && t.TimeKeepingLeaveStatus == TimeKeepingLeaveStatus.None
-                                && (t.NumberOfWorkingHour ?? 0) > 0)
+                                && (
+                                       (t.NumberOfWorkingHour ?? 0) > 0
+                                       || (t.NumberOfWorkingHour == null && t.StartTime.HasValue)
+                                   ))
                     .Select(t => t.Date!.Value.Date)
                     .Distinct()
                     .Count(),
