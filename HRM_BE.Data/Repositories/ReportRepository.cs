@@ -30,7 +30,7 @@ namespace HRM_BE.Data.Repositories
                     e.OrganizationId,
                     OrganizationName = e.Organization != null ? e.Organization.OrganizationName : "Chưa phân bổ",
                     e.StaffPositionId,
-                    PositionName = e.StaffPosition != null ? e.StaffPosition.StaffPositionName : "Chưa có vị trí",
+                    PositionName = e.StaffPosition != null ? e.StaffPosition.PositionName : "Chưa có vị trí",
                     e.WorkingStatus
                 })
                 .ToListAsync();
@@ -425,23 +425,6 @@ namespace HRM_BE.Data.Repositories
                     };
                 })
                 .OrderBy(o => o.Month)
-                .ToList();
-                        && x.TimeKeepingLeaveStatus == Core.Data.Payroll_Timekeeping.TimekeepingRegulation.TimeKeepingLeaveStatus.None);
-
-                    return new EmployeeAttendance
-                    {
-                        EmployeeId = g.Key.EmployeeId ?? 0,
-                        FullName = g.Key.FullName ?? "",
-                        Department = g.Key.Department ?? "",
-                        WorkDays = workDays,
-                        LateDays = lateDays,
-                        EarlyLeaveDays = earlyLeaveDays,
-                        AbsentDays = absentDays,
-                        LeaveDays = leaveDays,
-                        AttendanceRate = totalRecords > 0 ? Math.Round(workDays / totalRecords * 100, 2) : 0
-                    };
-                })
-                .OrderByDescending(e => e.AttendanceRate)
                 .ToList();
 
             // Leave type distribution
