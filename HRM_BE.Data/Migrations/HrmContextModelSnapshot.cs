@@ -1393,6 +1393,9 @@ namespace HRM_BE.Data.Migrations
                     b.Property<decimal?>("OvertimeAmount")
                         .HasColumnType("decimal(18,2)");
 
+                    b.Property<decimal?>("HolidayWorkAmount")
+                        .HasColumnType("decimal(18,2)");
+
                     b.Property<decimal?>("ParkingAmount")
                         .HasColumnType("decimal(18,2)");
 

@@ -17,6 +17,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using HRM_BE.Core.Data.Payroll_Timekeeping.TimekeepingRegulation;
+using HRM_BE.Core.Data.Payroll_Timekeeping.LeaveRegulation;
 
 namespace HRM_BE.Data.Repositories
 {
@@ -314,6 +315,50 @@ namespace HRM_BE.Data.Repositories
                 // Hệ số OT 200%
                 var overtimeAmount = otHoursDecimal * 2m * hourlySalary;
 
+                // ===== Lương phụ trội làm việc ngày nghỉ lễ =====
+                // Lấy danh sách ngày lễ trong kỳ lương của tổ chức
+                var holidays = _dbContext.Holidays
+                    .Where(h => h.OrganizationId == payroll.OrganizationId
+                             && h.FromDate.Date <= periodEndDate
+                             && h.ToDate.Date >= periodStartDate
+                             && h.IsDeleted != true)
+                    .ToList();
+
+                decimal holidayWorkAmount = 0m;
+                if (holidays.Any())
+                {
+                    // Tập hợp tất cả các ngày lễ trong kỳ
+                    var holidayDates = holidays
+                        .SelectMany(h => Enumerable.Range(0, (h.ToDate.Date - h.FromDate.Date).Days + 1)
+                            .Select(d => h.FromDate.Date.AddDays(d)))
+                        .Distinct()
+                        .ToHashSet();
+
+                    // Tổng giờ làm ngày lễ (chỉ tính những ngày đi làm bình thường, không phải nghỉ phép)
+                    var holidayHours = employeeTimesheetsInPeriod
+                        .Where(t => t.TimeKeepingLeaveStatus == TimeKeepingLeaveStatus.None
+                                 && t.Date.HasValue
+                                 && holidayDates.Contains(t.Date.Value.Date)
+                                 && (t.NumberOfWorkingHour ?? 0) > 0)
+                        .Sum(t => (decimal)(t.NumberOfWorkingHour ?? 0));
+
+                    if (holidayHours > 0)
+                    {
+                        // Lấy hệ số WorkFactor cho ngày lễ (lấy hệ số cao nhất nếu có nhiều ngày lễ khác nhau)
+                        // Mặc định 2.0 nếu không cấu hình (200% theo Luật Lao động VN)
+                        var holidayIds = holidays.Select(h => h.Id).ToList();
+                        var workFactors = _dbContext.WorkFactors
+                            .Where(wf => holidayIds.Contains(wf.HolidayId ?? 0) && wf.IsDeleted != true)
+                            .Select(wf => wf.Factor)
+                            .ToList();
+                        var holidayFactor = workFactors.Any() ? workFactors.Max() ?? 2.0m : 2.0m;
+
+                        // Phụ trội = giờ làm ngày lễ × lương giờ × (hệ số - 1)
+                        // Phần lương ngày thường (×1) đã được tính trong ReceivedSalary, chỉ tính phần chênh lệch
+                        holidayWorkAmount = holidayHours * hourlySalary * (holidayFactor - 1m);
+                    }
+                }
+
                 // Hoa hồng doanh thu (cấu hình theo bậc)
                 var revenue = kpiDetail?.Revenue ?? 0m;
                 var payrollDate = periodEndDate;
@@ -373,8 +418,8 @@ namespace HRM_BE.Data.Repositories
                 // Công thức: Lương lõi + (Phụ cấp + Gửi xe + Hoa hồng + OT từ cấu hình) - (BHXH + BHTN + BHYT + Quỹ công đoàn từ Salary Component) - Khấu trừ khác
                 var coreSalary = ((decimal)receivedSalary + (decimal)kpiSalary + (decimal)bonus) * ((decimal)salaryRate / 100);
 
-                // Tổng lương (trước trừ BHXH, Quỹ công đoàn): Lương cứng + Phụ cấp đi lại ăn trưa + Tiền gửi xe + Hoa hồng + Lương tăng ca
-                var totalSalary = coreSalary + allowanceMealTravel + parkingAmount + overtimeAmount + commissionAmount;
+                // Tổng lương (trước trừ BHXH, Quỹ công đoàn): Lương cứng + Phụ cấp đi lại ăn trưa + Tiền gửi xe + Hoa hồng + Lương tăng ca + Phụ trội ngày lễ
+                var totalSalary = coreSalary + allowanceMealTravel + parkingAmount + overtimeAmount + holidayWorkAmount + commissionAmount;
 
                 // Tổng thực nhận = Tổng lương - (BHXH+BHTN+BHYT) - Quỹ công đoàn - Khấu trừ khác
                 var totalReceivedSalary = totalSalary - (totalDeductions + totalInsuranceDeduction + unionFeeAmount);
@@ -403,6 +448,7 @@ namespace HRM_BE.Data.Repositories
                     AllowanceMealTravel = allowanceMealTravel,
                     ParkingAmount = parkingAmount,
                     OvertimeAmount = overtimeAmount,
+                    HolidayWorkAmount = holidayWorkAmount,
                     CommissionAmount = commissionAmount,
                     BhxhAmount = totalInsuranceDeduction,
                     UnionFeeAmount = unionFeeAmount,

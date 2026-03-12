@@ -1,4 +1,4 @@
-﻿using AutoMapper;
+using AutoMapper;
 using HRM_BE.Core.Data.Payroll_Timekeeping.LeaveRegulation;
 using HRM_BE.Core.Data.Payroll_Timekeeping.Shift;
 using HRM_BE.Core.Data.Payroll_Timekeeping.TimekeepingRegulation;
@@ -177,5 +177,24 @@ namespace HRM_BE.Data.Repositories
                 .FirstOrDefaultAsync(ts => ts.EmployeeId == employeeId && ts.ShiftWorkId == shiftWorkId && ts.Date.HasValue && ts.Date.Value.Date == date.Date);
         }
 
+        // Tạo mới bản ghi chấm công (thêm ngày không đi làm hoặc ngày chưa có dữ liệu)
+        public async Task<int> CreateTimesheet(CreateTimesheetRequest request)
+        {
+            var entity = new Timesheet
+            {
+                EmployeeId = request.EmployeeId,
+                ShiftWorkId = request.ShiftWorkId,
+                Date = request.Date.Date,
+                StartTime = request.StartTime,
+                EndTime = request.EndTime,
+                NumberOfWorkingHour = request.NumberOfWorkingHour,
+                TimeKeepingLeaveStatus = request.TimeKeepingLeaveStatus,
+                LateDuration = request.LateDuration,
+                EarlyLeaveDuration = request.EarlyLeaveDuration,
+            };
+
+            await CreateAsync(entity);
+            return entity.Id;
+        }
     }
 }
