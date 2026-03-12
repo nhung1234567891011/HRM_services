@@ -53,6 +53,25 @@ namespace HRM_BE.Data.Repositories
         public async Task Delete(int id)
         {
             var entity = await GetOrganizationAndCheckExist(id);
+
+            // Không được xóa đơn vị cha khi còn đơn vị con
+            var hasChildren = await _dbContext.Organizations
+                .AsNoTracking()
+                .AnyAsync(o => o.OrganizatioParentId == id && o.IsDeleted == false);
+            if (hasChildren)
+            {
+                throw new EntityAlreadyExistsException("Không thể xóa đơn vị vì còn đơn vị con.");
+            }
+
+            // Không được xóa đơn vị đang có nhân viên
+            var hasEmployees = await _dbContext.Employees
+                .AsNoTracking()
+                .AnyAsync(e => e.OrganizationId == id && e.IsDeleted == false);
+            if (hasEmployees)
+            {
+                throw new EntityAlreadyExistsException("Không thể xóa đơn vị vì đang có nhân viên thuộc đơn vị này.");
+            }
+
             entity.IsDeleted = true;
             await UpdateAsync(entity);
         }

@@ -46,6 +46,7 @@ namespace HRM_BE.Data.SeedWorks
             Address = new AddressRepository(context, httpContextAccessor);
             GeneralLeaveRegulation = new GeneralLeaveRegulationRepository(context, mapper, httpContextAccessor);
             LeaveApplications= new LeaveApplicationRepository(context, mapper, httpContextAccessor);
+            CheckInCheckOutApplications = new CheckInCheckOutApplicationRepository(context, mapper, httpContextAccessor);
             TypeOfLeave = new TypeOfLeaveRepository(context, mapper, httpContextAccessor);
             Holiday = new HolidayRepository(context, mapper, httpContextAccessor);
             WorkFactor = new WorkFactorRepository(context, mapper, httpContextAccessor);
@@ -123,6 +124,7 @@ namespace HRM_BE.Data.SeedWorks
         public ITimekeepingLocationRepository TimekeepingLocation { get; private set; }
         public ITimekeepingSettingRepository TimekeepingSetting { get; private set; }
         public ILeaveApplicationRepository LeaveApplications { get; private set; }
+        public ICheckInCheckOutApplicationRepository CheckInCheckOutApplications { get; private set; }
         public IShiftCatalogRepository ShiftCatalogs { get; private set; }
         public IShiftWorkRepository ShiftWorks { get; private set; }
         public IDetailTimeSheetRepository DetailTimeSheets { get; private set; }

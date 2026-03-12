@@ -65,6 +65,20 @@ namespace HRM_BE.Data.Repositories
 
         public async Task Delete(int id)
         {
+            // Không cho phép xóa nhân viên nếu đang có hợp đồng còn hiệu lực
+            var currentTime = DateTime.Now;
+            var hasValidContract = await _dbContext.Contracts
+                .AsNoTracking()
+                .AnyAsync(c =>
+                    c.EmployeeId == id &&
+                    c.EffectiveDate <= currentTime &&
+                    (c.ExpiryDate == null || c.ExpiryDate >= currentTime));
+
+            if (hasValidContract)
+            {
+                throw new EntityAlreadyExistsException("Nhân viên đang có hợp đồng còn hiệu lực, không thể xóa.");
+            }
+
             var entity = await GetEmployeeAndCheckExsit(id);
             entity.IsDeleted = true;
             await UpdateAsync(entity);

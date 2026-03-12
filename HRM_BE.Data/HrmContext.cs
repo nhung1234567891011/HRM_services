@@ -126,8 +126,10 @@ namespace HRM_BE.Data
         public virtual DbSet<SummaryTimesheetNameEmployeeConfirm> SummaryTimesheetNameEmployeeConfirms { get; set; } = null!;
 
         //Official form
-
+       
         public virtual DbSet<LeaveApplication> LeaveApplications { get; set; } = null!;
+
+        public virtual DbSet<CheckInCheckOutApplication> CheckInCheckOutApplications { get; set; } = null!;
 
         public virtual DbSet<LeaveApplicationApprover> LeaveApplicationApprovers { get; set; } = null!;
 
@@ -365,6 +367,9 @@ namespace HRM_BE.Data
             builder.Entity<LeaveApplicationApprover>().HasKey(laa => new { laa.ApproverId, laa.LeaveApplicationId });
             builder.Entity<LeaveApplicationReplacement>().HasKey(lar => new { lar.ReplacementId, lar.LeaveApplicationId });
             builder.Entity<LeaveApplicationRelatedPerson>().HasKey(lap => new { lap.RelatedPersonId, lap.LeaveApplicationId });
+
+            builder.Entity<CheckInCheckOutApplication>()
+                .HasQueryFilter(x => x.IsDeleted == null || x.IsDeleted == false);
 
             //TimeKeeping
             builder.Entity<DetailTimesheetNameStaffPosition>().HasKey(laa => new { laa.StaffPositionId, laa.DetailTimesheetNameId });

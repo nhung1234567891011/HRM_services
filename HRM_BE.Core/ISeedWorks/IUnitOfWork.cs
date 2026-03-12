@@ -47,6 +47,7 @@ namespace HRM_BE.Core.ISeedWorks
         public ITimesheetRepository Timesheet { get; }
         public ITimekeepingSettingRepository TimekeepingSetting { get; }
         public ILeaveApplicationRepository LeaveApplications { get; }
+        public ICheckInCheckOutApplicationRepository CheckInCheckOutApplications { get; }
         public IShiftCatalogRepository ShiftCatalogs { get; }
         public IShiftWorkRepository ShiftWorks { get; }
         public IDetailTimeSheetRepository DetailTimeSheets { get; }
