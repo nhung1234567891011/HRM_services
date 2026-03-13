@@ -1,9 +1,10 @@
-﻿using HRM_BE.Core.Data.Payroll_Timekeeping.TimekeepingRegulation;
+using HRM_BE.Core.Data.Payroll_Timekeeping.TimekeepingRegulation;
 using HRM_BE.Core.ISeedWorks;
 using HRM_BE.Core.Models.Common;
 using HRM_BE.Core.Models.Payroll_Timekeeping.TimekeepingRegulation;
 using HRM_BE.Core.Models.ShiftCatalog;
 using HRM_BE.Core.Models.ShiftWork;
+using System;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -26,6 +27,7 @@ namespace HRM_BE.Core.IRepositories
         // Lấy thông tin chấm công theo nhân viên và ca làm việc
         Task<Timesheet?> GetByEmployeeAndShiftAsync(int employeeId, int shiftWorkId, DateTime date);
 
-
+        // Tạo mới bản ghi chấm công (thêm ngày không đi làm hoặc ngày chưa có dữ liệu)
+        Task<int> CreateTimesheet(CreateTimesheetRequest request);
     }
 }

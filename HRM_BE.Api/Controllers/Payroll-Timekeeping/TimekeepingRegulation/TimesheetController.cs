@@ -1,4 +1,4 @@
-﻿using HRM_BE.Core.ISeedWorks;
+using HRM_BE.Core.ISeedWorks;
 using HRM_BE.Core.Models.Common;
 using HRM_BE.Core.Models.Official_Form.LeaveApplication;
 using HRM_BE.Core.Models.Payroll_Timekeeping.LeaveRegulation;
@@ -63,6 +63,16 @@ namespace HRM_BE.Api.Controllers.Payroll_Timekeeping.TimekeepingRegulation
         {
             await _unitOfWork.Timesheet.Update(id, request);
             return Ok(ApiResult<bool>.Success("Cập nhật chấm công chi tiết thành công", true));
+        }
+
+        /// <summary>
+        /// Thêm mới bản ghi chấm công (cho ngày không đi làm hoặc chưa có dữ liệu)
+        /// </summary>
+        [HttpPost("create")]
+        public async Task<IActionResult> Create([FromBody] CreateTimesheetRequest request)
+        {
+            var id = await _unitOfWork.Timesheet.CreateTimesheet(request);
+            return Ok(ApiResult<int>.Success("Tạo bản ghi chấm công thành công", id));
         }
 
         /// <summary>
