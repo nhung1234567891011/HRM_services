@@ -66,6 +66,7 @@ namespace HRM_BE.Core.ISeedWorks
         public IUserConnectionRepository UserConnections { get; }
         public IRemindWorkNotificationRepository RemindWorkNotifications { get; }
         public IRemindWorkRepository RemindWorks { get; }
+        public IReportRepository Reports { get; }
         Task<int> CompleteAsync();
     }
 }

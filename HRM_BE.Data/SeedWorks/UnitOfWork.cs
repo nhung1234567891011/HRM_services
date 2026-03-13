@@ -82,6 +82,7 @@ namespace HRM_BE.Data.SeedWorks
             RemindWorkNotifications = new RemindWorkNotificationRepository(context, mapper, httpContextAccessor);
             RemindWorks = new RemindWorkRepository(context, mapper, httpContextAccessor);
             UserConnections = new UserConnectionRepository(context,mapper,httpContextAccessor);
+            Reports = new ReportRepository(context);
         }
 
         public ILeavePermissionRepository LeavePermissions { get; private set; }
@@ -142,6 +143,7 @@ namespace HRM_BE.Data.SeedWorks
         public IUserConnectionRepository UserConnections { get; private set; }
         public IRemindWorkNotificationRepository RemindWorkNotifications { get; private set; }
         public IRemindWorkRepository RemindWorks { get; private set; }
+        public IReportRepository Reports { get; private set; }
         public async Task<int> CompleteAsync()
         {
             return await _context.SaveChangesAsync();

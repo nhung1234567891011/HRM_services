@@ -186,6 +186,10 @@
         public const string ManagePayrollTableSend = "MPT.S";
         public const string ManagePayrollTableFeedback = "MPT.FB";
 
+        // Statistical Report Permissions
+        public const string ManageStatisticalReport = "MSR";
+        public const string ManageStatisticalReportView = "MSR.V";
+
     }
 }
 
