@@ -172,11 +172,15 @@ namespace HRM_BE.Api.Controllers.SummaryTimeSheet
                 var totalHoliday = await _unitOfWork.Holiday.GetNumberHoliday(item.StartDate, item.EndDate, organizationId);
                 var totalHourHoliday = totalHoliday * shiftCatalog.WorkingHours.Value; // số giờ nghỉ lễ
 
+                var paidLeaveHours = totalLeaveDay * shiftCatalog.WorkingHours.Value;
+
                 item.TotalLeaveDay = totalLeaveDay + totalHoliday;
-                item.TotalHour = totalWorkingHours;
                 item.TotalWorkingDay = totalWorkingDay;
+
+                item.TotalHour = totalWorkingHours + paidLeaveHours + totalHourHoliday;
+
                 item.EqualDay = item.TotalHour > 0
-                    ? ((totalWorkingHours + totalHourHoliday) / shiftCatalog.WorkingHours.Value)
+                    ? (item.TotalHour / shiftCatalog.WorkingHours.Value)
                     : 0;
             }
         }

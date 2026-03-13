@@ -250,8 +250,11 @@ namespace HRM_BE.Data.Repositories
                         ToDate = h.ToDate,
                         OrganizationId = h.OrganizationId,
                         ApplyObject = h.ApplyObject
-                    }).ToList()
+                    }).ToList(),
+                    PermittedLeaves = new List<PermittedLeaveDto>()
                 }).ToListAsync();
+
+            await FillPermittedLeavesAsync(data, startDate, endDate);
 
             return data;
         }
@@ -353,23 +356,12 @@ namespace HRM_BE.Data.Repositories
                     ToDate = h.ToDate,
                     OrganizationId = h.OrganizationId,
                     ApplyObject = h.ApplyObject
-                }).ToList()
-                //PermittedLeaves = e.PermittedLeaves
-                //.Where(p =>
-                //    p.StartDate.Value.Date <= detailTimeSheet.EndDate.Value.Date &&
-                //    p.EndDate.Value.Date >= detailTimeSheet.StartDate.Value.Date &&
-                //    p.Status == LeaveApplicationStatus.Approved &&
-                //    //p.LeavePermission.Any(lp => lp.LeavePerrmissionStatus == LeavePerrmissionStatus.Active) &&
-                //    p.EmployeeId == e.Id)
-                //.OrderBy(p => p.CreatedAt)
-                //.Select(p => new PermittedLeaveDto
-                //{
-                //    Id = p.Id,
-                //    Date = null,
-                //    NumberOfDays = p.NumberOfDays.Value
-                //}).ToList()
+                }).ToList(),
+                PermittedLeaves = new List<PermittedLeaveDto>()
             }).ToListAsync();
             #endregion
+
+            await FillPermittedLeavesAsync(data, detailTimeSheet.StartDate!.Value.Date, detailTimeSheet.EndDate!.Value.Date);
 
             var result = new PagingResult<GetDetailTimesheetWithEmployeeDto>(data, pageIndex, pageSize, sortBy, orderBy, total);
             //var leaveApplications = await _dbContext.LeaveApplications.Where( s => s.StartDate <= detailTimeSheet.EndDate).ToListAsync();
@@ -430,6 +422,55 @@ namespace HRM_BE.Data.Repositories
             }
 
             return leaveDays.OrderBy(d => d).ToList();
+        }
+
+        private async Task FillPermittedLeavesAsync(List<GetDetailTimesheetWithEmployeeDto> items, DateTime startDate, DateTime endDate)
+        {
+            if (items is null || items.Count == 0) return;
+
+            var employeeIds = items.Select(i => i.Id).ToList();
+
+            var leaveApplications = await _dbContext.LeaveApplications
+                .Where(l =>
+                    l.EmployeeId.HasValue &&
+                    employeeIds.Contains(l.EmployeeId.Value) &&
+                    l.Status == LeaveApplicationStatus.Approved &&
+                    l.StartDate.HasValue &&
+                    l.EndDate.HasValue &&
+                    l.StartDate.Value.Date <= endDate &&
+                    l.EndDate.Value.Date >= startDate &&
+                    (l.SalaryPercentage > 0 || l.OnPaidLeaveStatus == OnPaidLeaveStatus.Yes))
+                .AsNoTracking()
+                .ToListAsync();
+
+            var grouped = leaveApplications.GroupBy(l => l.EmployeeId);
+
+            foreach (var item in items)
+            {
+                var leavesOfEmployee = grouped.FirstOrDefault(g => g.Key == item.Id);
+                if (leavesOfEmployee == null) continue;
+
+                var permittedLeaves = new List<PermittedLeaveDto>();
+
+                foreach (var leave in leavesOfEmployee)
+                {
+                    var effectiveStart = leave.StartDate!.Value.Date < startDate ? startDate : leave.StartDate!.Value.Date;
+                    var effectiveEnd = leave.EndDate!.Value.Date > endDate ? endDate : leave.EndDate!.Value.Date;
+
+                    if (effectiveEnd < effectiveStart) continue;
+
+                    var dates = GetDatesInRange(effectiveStart, effectiveEnd);
+
+                    permittedLeaves.Add(new PermittedLeaveDto
+                    {
+                        Id = leave.Id,
+                        Date = dates,
+                        NumberOfDays = dates.Count
+                    });
+                }
+
+                item.PermittedLeaves = permittedLeaves;
+            }
         }
 
         #region

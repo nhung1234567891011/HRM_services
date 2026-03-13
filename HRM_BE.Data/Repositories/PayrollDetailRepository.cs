@@ -16,6 +16,7 @@ using System.Globalization;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using HRM_BE.Core.Data.Official_Form;
 using HRM_BE.Core.Data.Payroll_Timekeeping.TimekeepingRegulation;
 using HRM_BE.Core.Data.Payroll_Timekeeping.LeaveRegulation;
 
@@ -230,23 +231,25 @@ namespace HRM_BE.Data.Repositories
                     .Select(t => t.Date!.Value.Date)
                     .Distinct()
                     .ToList();
-
-                // Các ngày nghỉ nhưng vẫn được hưởng lương (ví dụ nghỉ lễ Tết có lương)
-                var paidLeaveWithSalaryDates = employeeTimesheetsInPeriod
-                    .Where(t =>
-                        t.TimeKeepingLeaveStatus == TimeKeepingLeaveStatus.LeaveNotPermissionWithSalary)
-                    .Select(t => t.Date!.Value.Date)
-                    .Distinct()
-                    .ToList();
-
                 // attendanceDays: chỉ tính những ngày thật sự đi làm (không bao gồm ngày nghỉ hưởng lương)
                 var attendanceDays = workingDayDates.Count;
 
-                // ActualWorkDays dùng cho hiển thị/ngày công thực tế: chỉ bao gồm ngày thực sự đi làm (giống SummaryTimeSheet.TotalWorkingDay).
-                // Riêng lương (ReceivedSalary) vẫn tính theo cả ngày làm + ngày nghỉ nhưng được hưởng lương.
-                var actualWorkDaysForSalary = workingDayDates
-                    .Union(paidLeaveWithSalaryDates)
-                    .Count();
+                // Số ngày nghỉ nhưng vẫn được hưởng lương (đơn nghỉ phép đã duyệt, SalaryPercentage > 0 hoặc OnPaidLeaveStatus = Yes)
+                var paidLeaveQuery = _dbContext.LeaveApplications
+                    .Where(l =>
+                        l.EmployeeId == employee.Id &&
+                        l.Status == LeaveApplicationStatus.Approved &&
+                        l.StartDate.HasValue &&
+                        l.EndDate.HasValue &&
+                        l.StartDate.Value.Date < periodEndDate &&
+                        l.EndDate.Value.Date > periodStartDate &&
+                        (l.SalaryPercentage > 0 || l.OnPaidLeaveStatus == OnPaidLeaveStatus.Yes))
+                    .Select(l => l.NumberOfDays ?? 0);
+
+                var paidLeaveDaysCount = await EntityFrameworkQueryableExtensions.SumAsync(paidLeaveQuery);
+
+                // ActualWorkDays hiển thị trên phiếu lương: ngày đi làm thực tế + ngày nghỉ hưởng lương
+                var actualWorkDaysAll = attendanceDays + paidLeaveDaysCount;
 
                 // Ngày công quy đổi từ giờ làm tiêu chuẩn (tối đa 8h/ngày), KHÔNG bao gồm giờ tăng ca.
                 // Giờ tăng ca được tính riêng trong OvertimeAmount (hệ số 200%). Mỗi ngày: chỉ phần <= 8h vào ngày công, phần > 8h vào OT.
@@ -258,7 +261,7 @@ namespace HRM_BE.Data.Repositories
                         return Math.Min(totalHoursInDay, 8m);
                     });
 
-                var receivedSalary = standardWorkDays > 0 ? (baseSalary / (decimal)standardWorkDays) * actualWorkDaysForSalary : 0;
+                var receivedSalary = standardWorkDays > 0 ? (baseSalary / (decimal)standardWorkDays) * (decimal)actualWorkDaysAll : 0;
                 var kpi = contract?.KpiSalary ?? 0;
                 var kpiPercentage = kpiDetail?.CompletionRate ?? 0;
                 var kpiSalary = (decimal)kpi * ((decimal)kpiPercentage / 100);
@@ -436,8 +439,8 @@ namespace HRM_BE.Data.Repositories
                     ContractTypeStatus = contract?.ContractTypeStatus ?? ContractTypeStatus.Official,
                     BaseSalary = baseSalary,
                     StandardWorkDays = standardWorkDays,
-                    // Ngày công thực tế hiển thị trên phiếu lương: đồng bộ với SummaryTimeSheet.TotalWorkingDay
-                    ActualWorkDays = (double)attendanceDays,
+                    // Ngày công thực tế hiển thị trên phiếu lương: ngày đi làm + ngày nghỉ hưởng lương
+                    ActualWorkDays = actualWorkDaysAll,
                     ReceivedSalary = receivedSalary,
                     KPI = (decimal)kpi,
                     KpiPercentage = (decimal)kpiPercentage,
