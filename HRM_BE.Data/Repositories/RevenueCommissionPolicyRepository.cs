@@ -190,6 +190,27 @@ namespace HRM_BE.Data.Repositories
             await _dbContext.SaveChangesAsync();
         }
 
+        public async Task HardDelete(int id)
+        {
+            var policy = await _dbContext.RevenueCommissionPolicies
+                .Where(p => p.Id == id)
+                .Include(p => p.Tiers)
+                .FirstOrDefaultAsync();
+
+            if (policy == null)
+            {
+                throw new EntityNotFoundException(nameof(RevenueCommissionPolicy), $"Id = {id}");
+            }
+
+            if (policy.Tiers?.Any() == true)
+            {
+                _dbContext.RevenueCommissionTiers.RemoveRange(policy.Tiers);
+            }
+
+            _dbContext.RevenueCommissionPolicies.Remove(policy);
+            await _dbContext.SaveChangesAsync();
+        }
+
         private static void ValidateTiers(List<RevenueCommissionTierRequest> tiers)
         {
             if (tiers == null || tiers.Count == 0)

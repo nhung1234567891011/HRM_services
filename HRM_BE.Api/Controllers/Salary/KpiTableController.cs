@@ -1,4 +1,4 @@
-﻿using HRM_BE.Core.ISeedWorks;
+using HRM_BE.Core.ISeedWorks;
 using HRM_BE.Core.Models.Common;
 using HRM_BE.Core.Models.Salary.KpiTable;
 using Microsoft.AspNetCore.Mvc;
@@ -53,8 +53,17 @@ namespace HRM_BE.Api.Controllers.KpiTable
         [HttpPut("delete")]
         public async Task<IActionResult> Delete([FromQuery] EntityIdentityRequest<int> request)
         {
-            var result = _unitOfWork.KpiTables.Delete(request.Id);
-            return Ok(ApiResult<bool>.Success("Xoá phân ca thành công", true));
+            await _unitOfWork.KpiTables.Delete(request.Id);
+            await _unitOfWork.CompleteAsync();
+            return Ok(ApiResult<bool>.Success("Xoá bảng KPI thành công", true));
+        }
+
+        [HttpDelete("hard-delete")]
+        public async Task<IActionResult> HardDelete([FromQuery] EntityIdentityRequest<int> request)
+        {
+            await _unitOfWork.KpiTables.HardDelete(request.Id);
+            await _unitOfWork.CompleteAsync();
+            return Ok(ApiResult<bool>.Success("Xoá vĩnh viễn bảng KPI thành công", true));
         }
     }
 }

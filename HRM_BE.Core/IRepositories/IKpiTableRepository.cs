@@ -1,4 +1,4 @@
-﻿using HRM_BE.Core.Data.Payroll_Timekeeping.Shift;
+using HRM_BE.Core.Data.Payroll_Timekeeping.Shift;
 using HRM_BE.Core.Data.Salary;
 using HRM_BE.Core.ISeedWorks;
 using HRM_BE.Core.Models.Common;
@@ -19,6 +19,7 @@ namespace HRM_BE.Core.IRepositories
         Task<KpiTableDto> Create(CreateKpiTableRequest request);
         Task Update(int KpiTableId, UpdateKpiTableRequest request);
         Task Delete(int KpiTableId);
+        Task HardDelete(int KpiTableId);
         Task<KpiTableDto> GetByShiftWorkId(int shiftWorkId);
     }
 }

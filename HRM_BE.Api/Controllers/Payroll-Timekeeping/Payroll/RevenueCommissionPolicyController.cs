@@ -56,6 +56,13 @@ namespace HRM_BE.Api.Controllers.Payroll_Timekeeping.Payroll
             await _unitOfWork.RevenueCommissionPolicies.Delete(request.Id);
             return Ok(ApiResult<bool>.Success("Xoá cấu hình hoa hồng thành công", true));
         }
+
+        [HttpDelete("hard-delete")]
+        public async Task<IActionResult> HardDelete([FromQuery] EntityIdentityRequest<int> request)
+        {
+            await _unitOfWork.RevenueCommissionPolicies.HardDelete(request.Id);
+            return Ok(ApiResult<bool>.Success("Xoá vĩnh viễn cấu hình hoa hồng thành công", true));
+        }
     }
 }
 

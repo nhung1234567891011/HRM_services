@@ -13,6 +13,7 @@ namespace HRM_BE.Core.IRepositories
         Task Update(int id, UpdateRevenueCommissionPolicyRequest request);
         Task UpdateStatus(int id, Status status);
         Task Delete(int id);
+        Task HardDelete(int id);
     }
 }
 

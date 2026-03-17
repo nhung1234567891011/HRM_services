@@ -1,4 +1,4 @@
-﻿using AutoMapper;
+using AutoMapper;
 using HRM_BE.Core.Data.Payroll_Timekeeping.Shift;
 using HRM_BE.Core.Data.Salary;
 using HRM_BE.Core.Data.Staff;
@@ -179,6 +179,33 @@ namespace HRM_BE.Data.Repositories
             KpiTable.IsDeleted = true;
             await UpdateAsync(KpiTable);
 
+        }
+
+        public async Task HardDelete(int KpiTableId)
+        {
+            var kpiTable = await _dbContext.KpiTables
+                .Where(x => x.Id == KpiTableId)
+                .Include(x => x.KpiTablePositions)
+                .Include(x => x.KpiTableDetails)
+                .FirstOrDefaultAsync();
+
+            if (kpiTable == null)
+            {
+                throw new EntityNotFoundException(nameof(KpiTable), $"Id = {KpiTableId}");
+            }
+
+            if (kpiTable.KpiTablePositions?.Any() == true)
+            {
+                _dbContext.KpiTablePositions.RemoveRange(kpiTable.KpiTablePositions);
+            }
+
+            if (kpiTable.KpiTableDetails?.Any() == true)
+            {
+                _dbContext.KpiTableDetails.RemoveRange(kpiTable.KpiTableDetails);
+            }
+
+            _dbContext.KpiTables.Remove(kpiTable);
+            await _dbContext.SaveChangesAsync();
         }
 
         public async Task<KpiTableDto> GetByShiftWorkId(int shiftWorkId)
