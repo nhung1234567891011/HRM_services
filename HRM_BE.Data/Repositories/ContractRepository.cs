@@ -165,15 +165,15 @@ namespace HRM_BE.Data.Repositories
 
         public async Task<bool> CheckEmployeeHaveContractValid(int employeeId)
         {
-            var currentTime = DateTime.Now;
+            var currentDate = DateTime.Today;
 
             // Kiểm tra xem nhân viên có hợp đồng hợp lệ và còn hạn không
             var hasValidContract = await _dbContext.Contracts
                 .AsNoTracking()
                 .AnyAsync(c =>
                     c.EmployeeId == employeeId &&
-                    c.EffectiveDate <= currentTime &&
-                    (c.ExpiryDate == null || c.ExpiryDate >= currentTime));
+                    c.EffectiveDate <= currentDate &&
+                    (c.ExpiryDate == null || c.ExpiryDate >= currentDate));
 
             return hasValidContract;
         }
