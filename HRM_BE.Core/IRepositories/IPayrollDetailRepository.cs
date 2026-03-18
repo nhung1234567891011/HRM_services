@@ -21,6 +21,7 @@ namespace HRM_BE.Core.IRepositories
         Task DeleteRange(List<int> ids);
         Task<List<PayrollDetailDto>> FetchPayrollDetails(int payrollId);
         Task SendPayrollDetailConfirmation(UpdateSendPayrollDetailConfirmationRequest request);
+        Task<List<PayrollDetailEmailSendDto>> GetPayrollDetailEmailSendData(List<int> payrollDetailIds);
         Task ConfirmPayrollDetailByEmployee(int payrollDetailId);
     }
 }

@@ -955,8 +955,8 @@ namespace HRM_BE.Data.Repositories
         // Nhân viên xác nhận bảng lương
         public async Task ConfirmPayrollDetailByEmployee(int payrollDetailId)
         {
-            // Kiểm tra nếu ID không hợp lệ
-            if (payrollDetailId <= 0)
+            // Kiểm tra nếu ID âm (trường hợp gửi sai format)
+            if (payrollDetailId < 0)
             {
                 throw new ArgumentException("PayrollDetailId không hợp lệ.");
             }
@@ -974,6 +974,21 @@ namespace HRM_BE.Data.Repositories
 
             await UpdateAsync(payrollDetail);
 
+        }
+
+        public async Task<List<PayrollDetailEmailSendDto>> GetPayrollDetailEmailSendData(List<int> payrollDetailIds)
+        {
+            if (payrollDetailIds == null || !payrollDetailIds.Any())
+            {
+                return new List<PayrollDetailEmailSendDto>();
+            }
+
+            var payrollDetails = await _dbContext.PayrollDetails
+                .Where(p => payrollDetailIds.Contains(p.Id) && p.IsDeleted != true)
+                .Include(p => p.Employee)
+                .ToListAsync();
+
+            return _mapper.Map<List<PayrollDetailEmailSendDto>>(payrollDetails);
         }
 
     }

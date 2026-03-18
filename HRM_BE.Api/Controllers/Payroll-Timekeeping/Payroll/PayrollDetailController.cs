@@ -145,41 +145,21 @@ namespace HRM_BE.Api.Controllers.Payroll_Timekeeping.Payroll
             {
                 await _unitOfWork.PayrollDetails.SendPayrollDetailConfirmation(request);
 
-                var firstDetail = await _unitOfWork.PayrollDetails.GetById(request.PayrollDetailIds[0]);
-                var payrollId = firstDetail.PayrollId;
-
-                var page = await _unitOfWork.PayrollDetails.Paging(
-                    organizationId: null,
-                    name: null,
-                    payrollId: payrollId,
-                    employeeId: null,
-                    sortBy: null,
-                    orderBy: null,
-                    pageIndex: 1,
-                    pageSize: int.MaxValue);
-
-                var detailsToSend = (page.Items ?? new List<PayrollDetailDto>())
-                    .Where(d => request.PayrollDetailIds.Contains(d.Id))
-                    .ToList();
+                // Lấy dữ liệu gửi mail trong 1 query (tránh Paging + N+1 GetById employee)
+                var detailsToSend = await _unitOfWork.PayrollDetails
+                    .GetPayrollDetailEmailSendData(request.PayrollDetailIds);
 
                 foreach (var payrollDetail in detailsToSend)
                 {
-                    string? email = null;
-                    if (payrollDetail.EmployeeId.HasValue)
-                    {
-                        var employeeDto = await _unitOfWork.Employees.GetById(payrollDetail.EmployeeId.Value);
-                        email = employeeDto.CompanyEmail ?? employeeDto.AccountEmail ?? employeeDto.PersonalEmail;
-                    }
-
-                    if (string.IsNullOrWhiteSpace(email))
+                    if (string.IsNullOrWhiteSpace(payrollDetail.Email))
                     {
                         continue;
                     }
 
                     await _mailService.SendMail(new SendMailRequest
                     {
-                        ToEmail = email,
-                        Subject = $"Phiếu lương - {payrollDetail.FullName}",
+                        ToEmail = payrollDetail.Email,
+                        Subject = "Phiếu lương - " + (payrollDetail.FullName ?? string.Empty),
                         Body = BuildPayrollDetailEmailBody(payrollDetail)
                     });
                 }
@@ -196,7 +176,37 @@ namespace HRM_BE.Api.Controllers.Payroll_Timekeeping.Payroll
         {
             var sb = new StringBuilder();
             sb.Append("<div style='font-family: Arial, sans-serif; font-size: 14px;'>");
-            sb.Append($"<p>Chào {System.Net.WebUtility.HtmlEncode(payrollDetail.FullName ?? "Anh/Chị")},</p>");
+            sb.Append("<p>Chào ");
+            sb.Append(System.Net.WebUtility.HtmlEncode(payrollDetail.FullName ?? "Anh/Chị"));
+            sb.Append(",</p>");
+            sb.Append("<p>Phiếu lương của Anh/Chị đã được gửi để xác nhận. Thông tin tóm tắt:</p>");
+
+            sb.Append("<table cellpadding='6' cellspacing='0' style='border-collapse: collapse; border: 1px solid #ddd;'>");
+            AppendRow(sb, "Mã nhân viên", payrollDetail.EmployeeCode);
+            AppendRow(sb, "Lương cơ bản", payrollDetail.BaseSalary);
+            AppendRow(sb, "Ngày công chuẩn", payrollDetail.StandardWorkDays);
+            AppendRow(sb, "Ngày công thực tế", payrollDetail.ActualWorkDays);
+            AppendRow(sb, "Lương theo công", payrollDetail.ReceivedSalary);
+            AppendRow(sb, "Lương KPI", payrollDetail.KpiSalary);
+            AppendRow(sb, "Thưởng", payrollDetail.Bonus);
+            AppendRow(sb, "Tổng lương", payrollDetail.TotalSalary);
+            AppendRow(sb, "Thực nhận", payrollDetail.TotalReceivedSalary);
+            AppendRow(sb, "Hạn phản hồi", payrollDetail.ResponseDeadline?.ToString("yyyy-MM-dd"));
+            sb.Append("</table>");
+
+            sb.Append("<p>Vui lòng đăng nhập hệ thống HRM để xem chi tiết và xác nhận phiếu lương.</p>");
+            sb.Append("<p>Trân trọng.</p>");
+            sb.Append("</div>");
+            return sb.ToString();
+        }
+
+        private static string BuildPayrollDetailEmailBody(PayrollDetailEmailSendDto payrollDetail)
+        {
+            var sb = new StringBuilder();
+            sb.Append("<div style='font-family: Arial, sans-serif; font-size: 14px;'>");
+            sb.Append("<p>Chào ");
+            sb.Append(System.Net.WebUtility.HtmlEncode(payrollDetail.FullName ?? "Anh/Chị"));
+            sb.Append(",</p>");
             sb.Append("<p>Phiếu lương của Anh/Chị đã được gửi để xác nhận. Thông tin tóm tắt:</p>");
 
             sb.Append("<table cellpadding='6' cellspacing='0' style='border-collapse: collapse; border: 1px solid #ddd;'>");
@@ -229,14 +239,30 @@ namespace HRM_BE.Api.Controllers.Payroll_Timekeeping.Payroll
         /// <summary>
         /// Nhân viên xem và xác nhận bảng lương
         /// </summary>
-        /// <param name="payrollDetailId"></param>
+        /// <param name="payrollDetailId">Id phiếu lương (query) hoặc lấy từ body.PayrollDetailIds[0]</param>
         /// <returns></returns>
         [HttpPost("confirm-payroll-detail-by-employee")]
-        public async Task<IActionResult> ConfirmPayrollDetailByEmployee([FromQuery] int payrollDetailId)
+        public async Task<IActionResult> ConfirmPayrollDetailByEmployee(
+            [FromQuery] int? payrollDetailId,
+            [FromBody] ConfirmPayrollDetailByEmployeeRequest? request)
         {
             try
             {
-                await _unitOfWork.PayrollDetails.ConfirmPayrollDetailByEmployee(payrollDetailId);
+                int? id = payrollDetailId;
+
+                if ((id == null || id <= 0) &&
+                    request?.PayrollDetailIds != null &&
+                    request.PayrollDetailIds.Any())
+                {
+                    id = request.PayrollDetailIds.FirstOrDefault();
+                }
+
+                if (id == null || id <= 0)
+                {
+                    return Ok(ApiResult<bool>.Failure("PayrollDetailId không hợp lệ.", false));
+                }
+
+                await _unitOfWork.PayrollDetails.ConfirmPayrollDetailByEmployee(id.Value);
                 return Ok(ApiResult<bool>.Success("Nhân viên xác nhận bảng lương thành công", true));
             }
             catch (Exception ex)
