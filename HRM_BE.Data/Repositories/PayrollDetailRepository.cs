@@ -248,8 +248,29 @@ namespace HRM_BE.Data.Repositories
 
                 var paidLeaveDaysCount = await EntityFrameworkQueryableExtensions.SumAsync(paidLeaveQuery);
 
-                // ActualWorkDays hiển thị trên phiếu lương: ngày đi làm thực tế + ngày nghỉ hưởng lương
-                var actualWorkDaysAll = attendanceDays + paidLeaveDaysCount;
+                // Lấy danh sách ngày lễ trong kỳ lương của tổ chức (dùng cho cả ngày công lễ và phụ trội làm ngày lễ)
+                var holidays = _dbContext.Holidays
+                    .Where(h => h.OrganizationId == payroll.OrganizationId
+                             && h.FromDate.Date <= periodEndDate
+                             && h.ToDate.Date >= periodStartDate
+                             && h.IsDeleted != true)
+                    .ToList();
+
+                var holidayDates = holidays
+                    .SelectMany(h => Enumerable.Range(0, (h.ToDate.Date - h.FromDate.Date).Days + 1)
+                        .Select(d => h.FromDate.Date.AddDays(d)))
+                    .Distinct()
+                    .ToHashSet();
+
+                // Ngày lễ trong kỳ mà nhân viên KHÔNG đi làm (không có chấm công) → vẫn được tính 1 ngày công (8 tiếng)
+                var holidayDaysOff = holidayDates
+                    .Where(d => d >= periodStartDate
+                             && d <= periodEndDate
+                             && !workingDayDates.Contains(d))
+                    .Count();
+
+                // ActualWorkDays hiển thị trên phiếu lương: ngày đi làm thực tế + ngày nghỉ hưởng lương + ngày nghỉ lễ tết
+                var actualWorkDaysAll = attendanceDays + paidLeaveDaysCount + holidayDaysOff;
 
                 // Ngày công quy đổi từ giờ làm tiêu chuẩn (tối đa 8h/ngày), KHÔNG bao gồm giờ tăng ca.
                 // Giờ tăng ca được tính riêng trong OvertimeAmount (hệ số 200%). Mỗi ngày: chỉ phần <= 8h vào ngày công, phần > 8h vào OT.
@@ -319,23 +340,9 @@ namespace HRM_BE.Data.Repositories
                 var overtimeAmount = otHoursDecimal * 2m * hourlySalary;
 
                 // ===== Lương phụ trội làm việc ngày nghỉ lễ =====
-                // Lấy danh sách ngày lễ trong kỳ lương của tổ chức
-                var holidays = _dbContext.Holidays
-                    .Where(h => h.OrganizationId == payroll.OrganizationId
-                             && h.FromDate.Date <= periodEndDate
-                             && h.ToDate.Date >= periodStartDate
-                             && h.IsDeleted != true)
-                    .ToList();
-
                 decimal holidayWorkAmount = 0m;
                 if (holidays.Any())
                 {
-                    // Tập hợp tất cả các ngày lễ trong kỳ
-                    var holidayDates = holidays
-                        .SelectMany(h => Enumerable.Range(0, (h.ToDate.Date - h.FromDate.Date).Days + 1)
-                            .Select(d => h.FromDate.Date.AddDays(d)))
-                        .Distinct()
-                        .ToHashSet();
 
                     // Tổng giờ làm ngày lễ (chỉ tính những ngày đi làm bình thường, không phải nghỉ phép)
                     var holidayHours = employeeTimesheetsInPeriod
