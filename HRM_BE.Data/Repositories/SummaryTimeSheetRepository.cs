@@ -360,47 +360,26 @@ namespace HRM_BE.Data.Repositories
 
             foreach (var item in data)
             {
-                //var summaryConfirmed = await _dbContext.SummaryTimesheetNameEmployeeConfirms
-                //    .Where(s => s.SummaryTimesheetNameId == item.Id)
-                //    .Select(e => e.SummaryTimesheetNameId).ToListAsync();
+                var statusList = await _dbContext.SummaryTimesheetNameEmployeeConfirms
+                    .Where(s => s.SummaryTimesheetNameId == item.Id)
+                    .Select(s => s.Status ?? SummaryTimesheetNameEmployeeConfirmStatus.None)
+                    .ToListAsync();
 
-                var employeeConfirmedCount = await _dbContext.SummaryTimesheetNameEmployeeConfirms
-                    .Where(s => s.Status == SummaryTimesheetNameEmployeeConfirmStatus.Confirm && s.SummaryTimesheetNameId == item.Id)
-                    .Select(e => e.EmployeeId).CountAsync();
+                var totalSent = statusList.Count;
+                var confirmedCount = statusList.Count(s => s == SummaryTimesheetNameEmployeeConfirmStatus.Confirm);
+                var sendedNotConfirmCount = statusList.Count(s => s == SummaryTimesheetNameEmployeeConfirmStatus.SendedNotConfirm);
 
-                //var periodTime = await _dbContext.SummaryTimesheetNames.Where(s => s.Id == item.Id)
-                //    .Select(d => new
-                //    {
-                //        minStartDate = d.SummaryTimesheetNameDetailTimesheetNames.Min(s => s.DetailTimesheetName.StartDate),
-                //        maxEndDate = d.SummaryTimesheetNameDetailTimesheetNames.Max(s => s.DetailTimesheetName.EndDate),
-                //    }).FirstOrDefaultAsync();
-                var organizationDescendantIds = await GetAllChildOrganizationIds(item.OrganizationId.Value);
-                organizationDescendantIds.Add(item.OrganizationId.Value);
-
-                var employeeCountItems = await _dbContext.Employees.Where( e => organizationDescendantIds.Contains(item.OrganizationId.Value) )
-                    .Select( e => e.Id).CountAsync();
-                
-                bool isConfirmed = employeeConfirmedCount == employeeCountItems;
-
-                bool isPending = employeeConfirmedCount > 0;
-
-                // đã gửi tất cả nhưng chưa ai xác nhận
-                bool notConfirmed = await _dbContext.SummaryTimesheetNameEmployeeConfirms
-                    .Where(s => s.Status == SummaryTimesheetNameEmployeeConfirmStatus.Confirm && s.SummaryTimesheetNameId == item.Id && s.Status == SummaryTimesheetNameEmployeeConfirmStatus.Pending)
-                    .Select(e => e.EmployeeId).CountAsync() == employeeCountItems;
-
-                if (isPending && isConfirmed == true)
+                if (totalSent > 0 && confirmedCount == totalSent)
                 {
                     item.Status = SummaryTimesheetNameEmployeeConfirmStatus.Confirm;
-
                 }
-                else if ( isPending && notConfirmed == false )
-                {
-                    item.Status = SummaryTimesheetNameEmployeeConfirmStatus.Pending;
-                }
-                else if (notConfirmed)
+                else if (totalSent > 0 && sendedNotConfirmCount == totalSent)
                 {
                     item.Status = SummaryTimesheetNameEmployeeConfirmStatus.SendedNotConfirm;
+                }
+                else if (totalSent > 0)
+                {
+                    item.Status = SummaryTimesheetNameEmployeeConfirmStatus.Pending;
                 }
                 else
                 {

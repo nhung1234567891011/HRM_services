@@ -51,6 +51,8 @@ namespace HRM_BE.Data.Repositories
 
         public async Task<PagingResult<SummaryTimesheetNameEmployeeConfirmDto>> PagingByEmployee(int? summaryTimesheetNameId, DateTime? startDate, DateTime? endDate, SummaryTimesheetNameEmployeeConfirmStatus? status, string? Note, DateTime? date, string? sortBy, string? orderBy, int employeeId, int pageIndex = 1, int pageSize = 10)
         {
+            await AutoConfirmExpiredAsync();
+
             var query = _dbContext.SummaryTimesheetNames
                 .Where(x => x.SummaryTimesheetNameEmployeeConfirms.Any() && x.SummaryTimesheetNameEmployeeConfirms.Any(y => y.EmployeeId == employeeId && y.Status != SummaryTimesheetNameEmployeeConfirmStatus.None))
                 .Select(stn => new
@@ -105,6 +107,8 @@ namespace HRM_BE.Data.Repositories
 
         public async Task<SummaryTimesheetNameSummaryTimesheetNameEmployeeConfirmDto> GetStatusByEmployee(int summaryTimesheetNameId, int employeeId)
         {
+            await AutoConfirmExpiredAsync();
+
             var query = _dbContext.SummaryTimesheetNameEmployeeConfirms.Where(x => x.SummaryTimesheetNameId == summaryTimesheetNameId && x.EmployeeId == employeeId).AsQueryable();
             var data = await _mapper.ProjectTo<SummaryTimesheetNameSummaryTimesheetNameEmployeeConfirmDto>(query).FirstOrDefaultAsync();
             return data;
@@ -220,6 +224,8 @@ namespace HRM_BE.Data.Repositories
 
         public async Task<SummaryTimesheetNameSummaryTimesheetNameEmployeeConfirmDto> CreateOrUpdate(CreateSummaryTimesheetNameEmployeeConfirmRequest request)
         {
+            await AutoConfirmExpiredAsync();
+
             var existingRecord = await _dbContext.SummaryTimesheetNameEmployeeConfirms
                 .FirstOrDefaultAsync(x => x.SummaryTimesheetNameId == request.SummaryTimesheetNameId
                                        && x.EmployeeId == request.EmployeeId);
@@ -246,6 +252,8 @@ namespace HRM_BE.Data.Repositories
 
         public async Task<List<SummaryTimesheetNameSummaryTimesheetNameEmployeeConfirmDto>> CreateOrUpdateMultiple(CreateSummaryTimesheetNameEmployeeConfirmMultipleRequest request)
         {
+            await AutoConfirmExpiredAsync();
+
             var resultList = new List<SummaryTimesheetNameSummaryTimesheetNameEmployeeConfirmDto>();
 
             foreach (var employeeId in request.EmployeeIds ?? new List<int>())
@@ -388,6 +396,28 @@ namespace HRM_BE.Data.Repositories
                 .ToList();
 
             return permittedLeaves;
+        }
+
+        private async Task AutoConfirmExpiredAsync()
+        {
+            var now = DateTime.Now;
+
+            var expiredRecords = await _dbContext.SummaryTimesheetNameEmployeeConfirms
+                .Where(x => x.Date.HasValue
+                            && x.Date.Value <= now
+                            && x.Status.HasValue
+                            && x.Status != SummaryTimesheetNameEmployeeConfirmStatus.Confirm
+                            && x.Status != SummaryTimesheetNameEmployeeConfirmStatus.Reject
+                            && x.Status != SummaryTimesheetNameEmployeeConfirmStatus.None)
+                .ToListAsync();
+
+            if (!expiredRecords.Any())
+            {
+                return;
+            }
+
+            expiredRecords.ForEach(x => x.Status = SummaryTimesheetNameEmployeeConfirmStatus.Confirm);
+            await _dbContext.SaveChangesAsync();
         }
 
 

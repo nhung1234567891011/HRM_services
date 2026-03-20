@@ -95,6 +95,27 @@ namespace HRM_BE.Data.Repositories
         public async Task Delete(int id)
         {
             var entity = await GetPayrollAndCheckExist(id);
+
+            if (entity.PayrollStatus == PayrollStatus.Locked)
+            {
+                throw new ApiException("Bảng lương đã khoá thì không xoá được");
+            }
+
+            if (entity.PayrollConfirmationStatus == PayrollConfirmationStatus.Confirmed)
+            {
+                throw new ApiException("Bảng lương đã xác nhận hết thì không xoá được");
+            }
+
+            var payrollDetails = await _dbContext.PayrollDetails
+                .Where(x => x.PayrollId == id && x.IsDeleted != true)
+                .Select(x => x.ConfirmationStatus)
+                .ToListAsync();
+
+            if (payrollDetails.Any() && payrollDetails.All(x => x == PayrollConfirmationStatusEmployee.Confirmed))
+            {
+                throw new ApiException("Bảng lương đã xác nhận hết thì không xoá được");
+            }
+
             entity.IsDeleted = true;
             await UpdateAsync(entity);
         }
