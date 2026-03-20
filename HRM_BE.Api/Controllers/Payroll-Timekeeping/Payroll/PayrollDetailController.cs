@@ -166,7 +166,7 @@ namespace HRM_BE.Api.Controllers.Payroll_Timekeeping.Payroll
 
                 return Ok(ApiResult<bool>.Success("Gửi xác nhận bảng lương thành công", true));
             }
-            catch (Exception ex)
+             catch (Exception ex)
             {
                 return Ok(ApiResult<bool>.Failure(ex.Message, false));
             }
