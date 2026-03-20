@@ -1,4 +1,4 @@
-﻿using HRM_BE.Core.ISeedWorks;
+using HRM_BE.Core.ISeedWorks;
 using HRM_BE.Core.Models.Common;
 using HRM_BE.Core.Models.Payroll_Timekeeping.LeaveRegulation;
 using HRM_BE.Core.Models.Payroll_Timekeeping.Payroll;
@@ -25,8 +25,15 @@ namespace HRM_BE.Api.Controllers.Payroll_Timekeeping.Payroll
         [HttpPost("create")]
         public async Task<ApiResult<PayrollDto>> Create(CreatePayrollRequest request)
         {
-            var result = await _unitOfWork.Payrolls.Create(request);
-            return ApiResult<PayrollDto>.Success("Thêm bảng lương thành công", result);
+            try
+            {
+                var result = await _unitOfWork.Payrolls.Create(request);
+                return ApiResult<PayrollDto>.Success("Thêm bảng lương thành công", result);
+            }
+            catch (Exception ex)
+            {
+                return ApiResult<PayrollDto>.Failure(ex.Message);
+            }
         }
 
         /// <summary>

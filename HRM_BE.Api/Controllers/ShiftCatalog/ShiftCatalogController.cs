@@ -49,8 +49,15 @@ namespace HRM_BE.Api.Controllers.ShiftCatalog
         [HttpPut("delete")]
         public async Task<IActionResult> Delete([FromQuery] EntityIdentityRequest<int> request)
         {
-            var result = _unitOfWork.ShiftCatalogs.Delete(request.Id);
+            await _unitOfWork.ShiftCatalogs.Delete(request.Id);
             return Ok(ApiResult<bool>.Success("Xoá phân ca thành công", true));
+        }
+
+        [HttpPut("delete-range")]
+        public async Task<IActionResult> DeleteRange([FromBody] ListEntityIdentityRequest<int> request)
+        {
+            await _unitOfWork.ShiftCatalogs.DeleteRange(request);
+            return Ok(ApiResult<bool>.Success("Xoá nhiều phân ca thành công", true));
         }
     }
 }

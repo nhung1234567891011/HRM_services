@@ -17,6 +17,7 @@ namespace HRM_BE.Core.IRepositories
         Task<ShiftCatalogDto> Create(CreateShiftCatalogRequest request);
         Task Update(int shiftCatalogId,UpdateShiftCatalogRequest request);
         Task Delete(int shiftCatalogId);
+        Task DeleteRange(ListEntityIdentityRequest<int> request);
         Task<ShiftCatalogDto> GetByShiftWorkId(int shiftWorkId);
 
 

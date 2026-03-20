@@ -44,9 +44,17 @@ namespace HRM_BE.Data.Repositories
         string? sortBy,
         string? orderBy,
         int pageIndex = 1,
-        int pageSize = 10)
+        int pageSize = 10,
+        int currentEmployeeId = 0,
+        bool isAdmin = false)
         {
             var query = _dbContext.LeaveApplications.Where(l => l.IsDeleted != true).AsQueryable();
+
+            if (!isAdmin)
+            {
+                query = query.Where(l => l.EmployeeId == currentEmployeeId
+                                         || l.LeaveApplicationApprovers.Any(a => a.ApproverId == currentEmployeeId));
+            }
 
             if (employeeId.HasValue)
             {

@@ -72,6 +72,16 @@ namespace HRM_BE.Data.Repositories
 
         }
 
+        public async Task DeleteRange(ListEntityIdentityRequest<int> request)
+        {
+            var entities = await _dbContext.ShiftCatalogs
+                .Where(x => request.Ids.Contains(x.Id))
+                .ToListAsync();
+
+            entities.ForEach(x => x.IsDeleted = true);
+            await SaveChangesAsync();
+        }
+
         public async Task<ShiftCatalogDto> GetByShiftWorkId(int shiftWorkId)
         {
             var shiftCatalog = await _dbContext.ShiftWorks.Include(sw => sw.ShiftCatalog).FirstOrDefaultAsync(sw => sw.Id == shiftWorkId);

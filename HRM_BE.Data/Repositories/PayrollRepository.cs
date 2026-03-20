@@ -1,4 +1,4 @@
-﻿using AutoMapper;
+using AutoMapper;
 using HRM_BE.Core.Data.Payroll_Timekeeping.LeaveRegulation;
 using HRM_BE.Core.Data.Payroll_Timekeeping.Payroll;
 using HRM_BE.Core.Exceptions;
@@ -29,6 +29,23 @@ namespace HRM_BE.Data.Repositories
 
         public async Task<PayrollDto> Create(CreatePayrollRequest request)
         {
+            if (request.SummaryTimesheetNameIds != null && request.SummaryTimesheetNameIds.Any())
+            {
+                var alreadyLinkedIds = await _dbContext.Set<PayrollSummaryTimesheet>()
+                    .Where(pst => pst.SummaryTimesheetNameId.HasValue
+                                  && request.SummaryTimesheetNameIds.Contains(pst.SummaryTimesheetNameId.Value)
+                                  && pst.Payroll != null
+                                  && pst.Payroll.IsDeleted != true)
+                    .Select(pst => pst.SummaryTimesheetNameId.Value)
+                    .Distinct()
+                    .ToListAsync();
+
+                if (alreadyLinkedIds.Any())
+                {
+                    throw new Exception("Bảng chấm công tổng hợp này đã được chuyển sang tính lương trước đó.");
+                }
+            }
+
             var entity = _mapper.Map<Payroll>(request);
 
             // Thêm các bảng chấm công tổng hợp vào bảng lương

@@ -1,7 +1,9 @@
 ﻿using AutoMapper;
 using Hangfire;
 using HRM_BE.Api.Services;
+using HRM_BE.Api.Extension;
 using HRM_BE.Core.Constants;
+using HRM_BE.Core.Constants.Identity;
 using HRM_BE.Core.Data.Official_Form;
 using HRM_BE.Core.Data.Payroll_Timekeeping.LeaveRegulation;
 using HRM_BE.Core.Data.Payroll_Timekeeping.TimekeepingRegulation;
@@ -14,6 +16,7 @@ using HRM_BE.Core.Models.Official_Form.LeaveApplication;
 using HRM_BE.Core.Models.Staff;
 using HRM_BE.Data;
 using HRM_BE.Data.Migrations;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -36,21 +39,75 @@ namespace HRM_BE.Api.Controllers.Official_Form
             _mapper = mapper;
             _dbContext = context;
         }
+
+        private int GetCurrentEmployeeId()
+        {
+            var claimValue = ((System.Security.Claims.ClaimsIdentity)User.Identity).GetSpecificClaim(ClaimTypeConstant.EmployeeId);
+            return int.TryParse(claimValue, out var employeeId) ? employeeId : 0;
+        }
+
+        private bool IsCurrentUserAdmin()
+        {
+            return User.Claims.Any(c => c.Type == ClaimTypeConstant.Permission && c.Value == PermissionConstant.Admin);
+        }
+
         /// <summary>
         /// HRM - Là Nhân viên,HR tôi muốn xem danh sách đơn xin nghỉ
         /// </summary>
         /// <param name="request"></param>
         /// <returns></returns>
+        [Authorize]
         [HttpGet("paging")]
         public async Task<ApiResult<PagingResult<LeaveApplicationDto>>> GetPaging([FromQuery] GetLeaveApplicationRequest request)
         {
-            var result = await _unitOfWork.LeaveApplications.GetPaging(request.OrganizationId,request.EmployeeId, request.StartDate,request.EndDate,request.NumberOfDays, request.TypeOfLeaveId,request.ReasonForLeave, request.Note,request.Status,request.SortBy, request.OrderBy, request.PageIndex,request.PageSize);
+            var currentEmployeeId = GetCurrentEmployeeId();
+            if (currentEmployeeId <= 0)
+            {
+                return ApiResult<PagingResult<LeaveApplicationDto>>.Failure("Không xác định được nhân viên đăng nhập.");
+            }
+
+            var result = await _unitOfWork.LeaveApplications.GetPaging(
+                request.OrganizationId,
+                request.EmployeeId,
+                request.StartDate,
+                request.EndDate,
+                request.NumberOfDays,
+                request.TypeOfLeaveId,
+                request.ReasonForLeave,
+                request.Note,
+                request.Status,
+                request.SortBy,
+                request.OrderBy,
+                request.PageIndex,
+                request.PageSize,
+                currentEmployeeId,
+                IsCurrentUserAdmin());
             return new ApiResult<PagingResult<LeaveApplicationDto>>("Danh sách đơn xin nghỉ đã được lấy thành công!", result);
         }
 
+        [Authorize]
         [HttpGet("get-by-id")]
         public async Task<ApiResult<LeaveApplicationDto>> GetById([FromQuery] EntityIdentityRequest<int> request)
         {
+            var currentEmployeeId = GetCurrentEmployeeId();
+            if (currentEmployeeId <= 0)
+            {
+                return ApiResult<LeaveApplicationDto>.Failure("Không xác định được nhân viên đăng nhập.");
+            }
+
+            var isAdmin = IsCurrentUserAdmin();
+            var canView = await _dbContext.LeaveApplications.AnyAsync(l =>
+                l.Id == request.Id &&
+                l.IsDeleted != true &&
+                (isAdmin ||
+                 l.EmployeeId == currentEmployeeId ||
+                 l.LeaveApplicationApprovers.Any(a => a.ApproverId == currentEmployeeId)));
+
+            if (!canView)
+            {
+                return ApiResult<LeaveApplicationDto>.Failure("Bạn không có quyền xem đơn xin nghỉ này.");
+            }
+
             var result = await _unitOfWork.LeaveApplications.GetById(request.Id);
             return new ApiResult<LeaveApplicationDto>("Đơn xin nghỉ đã được lấy thành công!", result);
         }
@@ -116,9 +173,23 @@ namespace HRM_BE.Api.Controllers.Official_Form
         /// <param name="id"></param>
         /// <param name="request"></param>
         /// <returns></returns>
+        [Authorize]
         [HttpPut("update-status")]
         public async Task<ApiResult<bool>> UpdateStatus(int id, [FromBody] UpdateStatusLeaveApplicationRequest request)
         {
+            var currentEmployeeId = GetCurrentEmployeeId();
+            if (currentEmployeeId <= 0)
+            {
+                return ApiResult<bool>.Failure("Không xác định được nhân viên đăng nhập.");
+            }
+
+            var canApprove = await _dbContext.LeaveApplicationApprovers
+                .AnyAsync(a => a.LeaveApplicationId == id && a.ApproverId == currentEmployeeId);
+            if (!canApprove)
+            {
+                return ApiResult<bool>.Failure("Chỉ người duyệt mới có thể duyệt đơn xin nghỉ.");
+            }
+
             if (request.Status == LeaveApplicationStatus.Rejected)
             {
                 await _unitOfWork.TypeOfLeaveEmployee.UpdateDaysRemaining(-request.UpdateDaysRemainingTypeOfLeaveEmployeeRequest.DaysRemaining, request.UpdateDaysRemainingTypeOfLeaveEmployeeRequest.EmployeeId, request.UpdateDaysRemainingTypeOfLeaveEmployeeRequest.TypeOfLeaveId, request.UpdateDaysRemainingTypeOfLeaveEmployeeRequest.Year);
@@ -289,9 +360,34 @@ namespace HRM_BE.Api.Controllers.Official_Form
         /// <param name="id"></param>
         /// <param name="request"></param>
         /// <returns></returns>
+        [Authorize]
         [HttpPut("update-status-multiple")]
         public async Task<ApiResult<bool>> UpdateStatusMultiple([FromBody] UpdateStatusLeaveApplicationMultipleRequest request)
         {
+            var currentEmployeeId = GetCurrentEmployeeId();
+            if (currentEmployeeId <= 0)
+            {
+                return ApiResult<bool>.Failure("Không xác định được nhân viên đăng nhập.");
+            }
+
+            var leaveApplicationIds = request.UpdateStatusLeaveApplicationRequests
+                .Select(x => x.Id)
+                .Distinct()
+                .ToList();
+
+            var approvableIds = await _dbContext.LeaveApplicationApprovers
+                .Where(a => a.LeaveApplicationId.HasValue
+                            && leaveApplicationIds.Contains(a.LeaveApplicationId.Value)
+                            && a.ApproverId == currentEmployeeId)
+                .Select(a => a.LeaveApplicationId.Value)
+                .Distinct()
+                .ToListAsync();
+
+            if (leaveApplicationIds.Except(approvableIds).Any())
+            {
+                return ApiResult<bool>.Failure("Chỉ người duyệt mới có thể duyệt đơn xin nghỉ.");
+            }
+
             foreach (var item in request.UpdateStatusLeaveApplicationRequests)
             {
                 if (item.Status == LeaveApplicationStatus.Rejected && item.UpdateDaysRemainingTypeOfLeaveEmployeeRequest != null)
