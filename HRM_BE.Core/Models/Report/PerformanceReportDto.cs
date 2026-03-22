@@ -3,7 +3,7 @@ namespace HRM_BE.Core.Models.Report
     public class PerformanceReportDto
     {
         public List<EmployeePerformance> EmployeePerformances { get; set; } = new();
-        public List<DepartmentPerformance> DepartmentPerformances { get; set; } = new();
+        public List<PositionPerformance> PositionPerformances { get; set; } = new();
         public List<KpiDistribution> KpiDistributions { get; set; } = new();
     }
 
@@ -11,7 +11,7 @@ namespace HRM_BE.Core.Models.Report
     {
         public int EmployeeId { get; set; }
         public string FullName { get; set; } = string.Empty;
-        public string Department { get; set; } = string.Empty;
+        public string Position { get; set; } = string.Empty;
         public decimal KpiScore { get; set; }
         public decimal KpiPercentage { get; set; }
         public double ActualWorkDays { get; set; }
@@ -19,10 +19,10 @@ namespace HRM_BE.Core.Models.Report
         public double WorkEfficiency { get; set; }
     }
 
-    public class DepartmentPerformance
+    public class PositionPerformance
     {
-        public int OrganizationId { get; set; }
-        public string OrganizationName { get; set; } = string.Empty;
+        public int StaffPositionId { get; set; }
+        public string PositionName { get; set; } = string.Empty;
         public decimal AverageKpi { get; set; }
         public decimal MedianKpi { get; set; }
         public int EmployeeCount { get; set; }

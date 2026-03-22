@@ -3,7 +3,7 @@ namespace HRM_BE.Core.Models.Report
     public class MonthlyIncomeReportDto
     {
         public List<MonthlyIncomeSummary> MonthlySummaries { get; set; } = new();
-        public List<DepartmentIncome> DepartmentIncomes { get; set; } = new();
+        public List<PositionIncome> PositionIncomes { get; set; } = new();
     }
 
     public class MonthlyIncomeSummary
@@ -19,10 +19,10 @@ namespace HRM_BE.Core.Models.Report
         public int EmployeeCount { get; set; }
     }
 
-    public class DepartmentIncome
+    public class PositionIncome
     {
-        public int OrganizationId { get; set; }
-        public string OrganizationName { get; set; } = string.Empty;
+        public int StaffPositionId { get; set; }
+        public string PositionName { get; set; } = string.Empty;
         public decimal TotalBaseSalary { get; set; }
         public decimal TotalAllowance { get; set; }
         public decimal TotalBonus { get; set; }
