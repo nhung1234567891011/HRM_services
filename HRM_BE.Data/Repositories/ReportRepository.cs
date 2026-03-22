@@ -51,13 +51,27 @@ namespace HRM_BE.Data.Repositories
                 .OrderByDescending(d => d.EmployeeCount)
                 .ToList();
 
+            var staffPositions = await _dbContext.StaffPositions
+                .Where(sp => sp.IsDeleted == false)
+                .Select(sp => new { sp.Id, sp.PositionName })
+                .AsNoTracking()
+                .ToDictionaryAsync(sp => sp.Id, sp => sp.PositionName ?? "Chưa có vị trí");
+
             var positionDistributions = activeEmployees
-                .GroupBy(e => new { e.StaffPositionId, e.PositionName })
-                .Select(g => new PositionDistribution
+                .GroupBy(e => e.StaffPositionId)
+                .Select(g =>
                 {
-                    StaffPositionId = g.Key.StaffPositionId ?? 0,
-                    PositionName = g.Key.PositionName ?? "Chưa có vị trí",
-                    EmployeeCount = g.Count()
+                    var staffPositionId = g.Key ?? 0;
+                    var positionName = g.Key.HasValue && staffPositions.TryGetValue(g.Key.Value, out var name)
+                        ? name
+                        : "Chưa có vị trí";
+
+                    return new PositionDistribution
+                    {
+                        StaffPositionId = staffPositionId,
+                        PositionName = positionName,
+                        EmployeeCount = g.Count()
+                    };
                 })
                 .OrderByDescending(p => p.EmployeeCount)
                 .ToList();
