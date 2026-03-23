@@ -1018,7 +1018,7 @@ namespace HRM_BE.Data.Repositories
         }
 
         /// <summary>
-        /// Cập nhật trạng thái xác nhận của bảng lương tổng dựa trên trạng thái của tất cả nhân viên
+        /// Cập nhật trạng thái xác nhận của bảng lương tổng dựa trên trạng thái của các nhân viên thuộc phạm vi được tính payroll
         /// </summary>
         private async Task UpdatePayrollConfirmationStatus(int? payrollId)
         {
@@ -1029,9 +1029,24 @@ namespace HRM_BE.Data.Repositories
 
             if (payroll == null) return;
 
-            // Lấy tất cả PayrollDetail của bảng lương này
+            // Lấy danh sách SummaryTimesheetNameId liên kết với Payroll này
+            var summaryTimesheetNameIds = await _dbContext.PayrollSummaryTimesheets
+                .Where(pst => pst.PayrollId == payrollId)
+                .Select(pst => pst.SummaryTimesheetNameId)
+                .ToListAsync();
+
+            var now = DateTime.Now;
+
+            // Lấy các PayrollDetail của bảng lương này, giới hạn đúng tập nhân viên giống logic tạo payroll details:
+            // - Có hợp đồng còn hạn (ExpiredStatus == false)
+            // - Đã confirm bảng chấm công tổng hợp (Status == Confirm) hoặc đã quá ngày confirm (Date < now)
             var allPayrollDetails = await _dbContext.PayrollDetails
                 .Where(pd => pd.PayrollId == payrollId.Value && pd.IsDeleted != true)
+                .Where(pd => pd.Employee.Contracts.Any(c => c.ExpiredStatus == false))
+                .Where(pd => pd.Employee.SummaryTimesheetNameEmployeeConfirms.Any(s =>
+                    summaryTimesheetNameIds.Contains(s.SummaryTimesheetNameId) &&
+                    (s.Status == SummaryTimesheetNameEmployeeConfirmStatus.Confirm ||
+                     (s.Date != null && s.Date < now))))
                 .Select(pd => pd.ConfirmationStatus)
                 .ToListAsync();
 
