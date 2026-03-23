@@ -97,21 +97,22 @@ namespace HRM_BE.Data.Repositories
         public async Task<MonthlyIncomeReportDto> GetMonthlyIncomeReport(int? organizationId, int year)
         {
             var query = _dbContext.PayrollDetails
-                .Where(pd => pd.IsDeleted == false)
+                .Where(pd => pd.IsDeleted == false && 
+                       (pd.Employee == null || pd.Employee.IsDeleted == false))
                 .AsNoTracking();
 
             if (organizationId.HasValue)
                 query = query.Where(pd => pd.OrganizationId == organizationId.Value);
 
-            // Filter by year using CreatedAt
             query = query.Where(pd => pd.CreatedAt.HasValue && pd.CreatedAt.Value.Year == year);
 
             var payrollDetails = await query
                 .Select(pd => new
                 {
                     pd.Id,
-                    pd.OrganizationId,
-                    OrganizationName = pd.Organization != null ? pd.Organization.OrganizationName : "Chưa phân bổ",
+                    StaffPositionId = pd.Employee != null ? pd.Employee.StaffPositionId : null,
+                    PositionName = pd.Employee != null && pd.Employee.StaffPosition != null 
+                        ? pd.Employee.StaffPosition.PositionName : "Chưa có vị trí",
                     pd.BaseSalary,
                     pd.Bonus,
                     pd.AllowanceMealTravel,
@@ -144,16 +145,16 @@ namespace HRM_BE.Data.Repositories
                 .OrderBy(m => m.Month)
                 .ToList();
 
-            var departmentIncomes = payrollDetails
-                .GroupBy(pd => new { pd.OrganizationId, pd.OrganizationName })
+            var positionIncomes = payrollDetails
+                .GroupBy(pd => new { pd.StaffPositionId, pd.PositionName })
                 .Select(g =>
                 {
                     var empCount = g.Select(x => x.EmployeeId).Distinct().Count();
                     var totalSalary = g.Sum(x => x.TotalReceivedSalary ?? 0);
-                    return new DepartmentIncome
+                    return new PositionIncome
                     {
-                        OrganizationId = g.Key.OrganizationId ?? 0,
-                        OrganizationName = g.Key.OrganizationName ?? "Chưa phân bổ",
+                        StaffPositionId = g.Key.StaffPositionId ?? 0,
+                        PositionName = g.Key.PositionName ?? "Chưa có vị trí",
                         TotalBaseSalary = g.Sum(x => x.BaseSalary ?? 0),
                         TotalAllowance = g.Sum(x => (x.AllowanceMealTravel ?? 0) + (x.ParkingAmount ?? 0) + (x.CommissionAmount ?? 0)),
                         TotalBonus = g.Sum(x => x.Bonus ?? 0),
@@ -169,15 +170,15 @@ namespace HRM_BE.Data.Repositories
             return new MonthlyIncomeReportDto
             {
                 MonthlySummaries = monthlySummaries,
-                DepartmentIncomes = departmentIncomes
+                PositionIncomes = positionIncomes
             };
         }
 
         public async Task<PerformanceReportDto> GetPerformanceReport(int? organizationId, int? year, int? month)
         {
-            // Query PayrollDetails for performance data
             var payrollQuery = _dbContext.PayrollDetails
-                .Where(pd => pd.IsDeleted == false)
+                .Where(pd => pd.IsDeleted == false && 
+                       (pd.Employee == null || pd.Employee.IsDeleted == false))
                 .AsNoTracking();
 
             if (organizationId.HasValue)
@@ -194,9 +195,9 @@ namespace HRM_BE.Data.Repositories
                 {
                     pd.EmployeeId,
                     pd.FullName,
-                    pd.Department,
-                    pd.OrganizationId,
-                    OrganizationName = pd.Organization != null ? pd.Organization.OrganizationName : "Chưa phân bổ",
+                    StaffPositionId = pd.Employee != null ? pd.Employee.StaffPositionId : null,
+                    PositionName = pd.Employee != null && pd.Employee.StaffPosition != null 
+                        ? pd.Employee.StaffPosition.PositionName : "Chưa có vị trí",
                     pd.KPI,
                     pd.KpiPercentage,
                     pd.ActualWorkDays,
@@ -219,7 +220,7 @@ namespace HRM_BE.Data.Repositories
                     {
                         EmployeeId = first.EmployeeId ?? 0,
                         FullName = first.FullName ?? "",
-                        Department = first.Department ?? first.OrganizationName ?? "",
+                        Position = first.PositionName ?? "Chưa có vị trí",
                         KpiScore = avgKpi,
                         KpiPercentage = avgKpiPct,
                         ActualWorkDays = totalActual,
@@ -230,8 +231,8 @@ namespace HRM_BE.Data.Repositories
                 .OrderByDescending(e => e.KpiScore)
                 .ToList();
 
-            var departmentPerformances = payrollData
-                .GroupBy(pd => new { pd.OrganizationId, pd.OrganizationName })
+            var positionPerformances = payrollData
+                .GroupBy(pd => new { pd.StaffPositionId, pd.PositionName })
                 .Select(g =>
                 {
                     var kpiValues = g.Where(x => x.KPI.HasValue).Select(x => x.KPI!.Value).ToList();
@@ -242,14 +243,13 @@ namespace HRM_BE.Data.Repositories
                             ? Math.Round((sortedKpi[sortedKpi.Count / 2 - 1] + sortedKpi[sortedKpi.Count / 2]) / 2, 2)
                             : sortedKpi[sortedKpi.Count / 2])
                         : 0;
-                    // Aggregate KpiPercentage per employee (average), then apply thresholds
                     var empKpiPcts = g.GroupBy(x => x.EmployeeId)
                         .Select(eg => eg.Where(x => x.KpiPercentage.HasValue).Select(x => x.KpiPercentage!.Value).DefaultIfEmpty(0).Average())
                         .ToList();
-                    return new DepartmentPerformance
+                    return new PositionPerformance
                     {
-                        OrganizationId = g.Key.OrganizationId ?? 0,
-                        OrganizationName = g.Key.OrganizationName ?? "Chưa phân bổ",
+                        StaffPositionId = g.Key.StaffPositionId ?? 0,
+                        PositionName = g.Key.PositionName ?? "Chưa có vị trí",
                         AverageKpi = avgKpi,
                         MedianKpi = medianKpi,
                         EmployeeCount = g.Select(x => x.EmployeeId).Distinct().Count(),
@@ -260,7 +260,6 @@ namespace HRM_BE.Data.Repositories
                 .OrderByDescending(d => d.AverageKpi)
                 .ToList();
 
-            // KPI distribution histogram (based on averaged KpiPercentage per employee)
             var employeeKpiPcts = employeePerformances.Select(e => (double)e.KpiPercentage).ToList();
             var totalEmpCount = employeeKpiPcts.Count;
             var kpiDistributions = new List<KpiDistribution>
@@ -275,16 +274,18 @@ namespace HRM_BE.Data.Repositories
             return new PerformanceReportDto
             {
                 EmployeePerformances = employeePerformances,
-                DepartmentPerformances = departmentPerformances,
+                PositionPerformances = positionPerformances,
                 KpiDistributions = kpiDistributions
             };
         }
 
         public async Task<AttendanceReportDto> GetAttendanceReport(int? organizationId, int year, int? month)
         {
-            // Query timesheets
             var timesheetQuery = _dbContext.Timesheets
-                .Where(t => t.IsDeleted == false && t.Date.HasValue && t.Date.Value.Year == year)
+                .Where(t => t.IsDeleted == false && 
+                       t.Date.HasValue && 
+                       t.Date.Value.Year == year &&
+                       (t.Employee == null || t.Employee.IsDeleted == false))
                 .AsNoTracking();
 
             if (organizationId.HasValue)
@@ -299,9 +300,9 @@ namespace HRM_BE.Data.Repositories
                 {
                     t.EmployeeId,
                     FullName = t.Employee != null ? (t.Employee.LastName + " " + t.Employee.FirstName) : "",
-                    Department = t.Employee != null && t.Employee.Organization != null
-                        ? t.Employee.Organization.OrganizationName : "Chưa phân bổ",
-                    OrganizationId = t.Employee != null ? t.Employee.OrganizationId : null,
+                    StaffPositionId = t.Employee != null ? t.Employee.StaffPositionId : null,
+                    PositionName = t.Employee != null && t.Employee.StaffPosition != null
+                        ? t.Employee.StaffPosition.PositionName : "Chưa có vị trí",
                     Month = t.Date.HasValue ? t.Date.Value.Month : 0,
                     Year = t.Date.HasValue ? t.Date.Value.Year : 0,
                     t.NumberOfWorkingHour,
@@ -311,7 +312,6 @@ namespace HRM_BE.Data.Repositories
                 })
                 .ToListAsync();
 
-            // Monthly attendance
             var monthlyAttendances = timesheets
                 .GroupBy(t => new { t.Month, t.Year })
                 .Select(g =>
@@ -341,9 +341,8 @@ namespace HRM_BE.Data.Repositories
                 .OrderBy(m => m.Month)
                 .ToList();
 
-            // Employee attendance
             var employeeAttendances = timesheets
-                .GroupBy(t => new { t.EmployeeId, t.FullName, t.Department })
+                .GroupBy(t => new { t.EmployeeId, t.FullName, t.PositionName })
                 .Select(g =>
                 {
                     var totalRecords = g.Count();
@@ -361,7 +360,7 @@ namespace HRM_BE.Data.Repositories
                     {
                         EmployeeId = g.Key.EmployeeId ?? 0,
                         FullName = g.Key.FullName ?? "",
-                        Department = g.Key.Department ?? "",
+                        Position = g.Key.PositionName ?? "Chưa có vị trí",
                         WorkDays = workDays,
                         LateDays = lateDays,
                         EarlyLeaveDays = earlyLeaveDays,
@@ -376,9 +375,8 @@ namespace HRM_BE.Data.Repositories
                 .OrderByDescending(e => e.AttendanceRate)
                 .ToList();
 
-            // Department attendance aggregation
-            var departmentAttendances = timesheets
-                .GroupBy(t => new { t.OrganizationId, t.Department })
+            var positionAttendances = timesheets
+                .GroupBy(t => new { t.StaffPositionId, t.PositionName })
                 .Select(g =>
                 {
                     var totalRecords = g.Count();
@@ -389,10 +387,10 @@ namespace HRM_BE.Data.Repositories
                         && x.TimeKeepingLeaveStatus == Core.Data.Payroll_Timekeeping.TimekeepingRegulation.TimeKeepingLeaveStatus.None);
                     var overtimeHours = g.Sum(x => Math.Max((x.NumberOfWorkingHour ?? 0) - 8.0, 0));
 
-                    return new DepartmentAttendance
+                    return new PositionAttendance
                     {
-                        OrganizationId = g.Key.OrganizationId ?? 0,
-                        OrganizationName = g.Key.Department ?? "Chưa phân bổ",
+                        StaffPositionId = g.Key.StaffPositionId ?? 0,
+                        PositionName = g.Key.PositionName ?? "Chưa có vị trí",
                         TotalWorkDays = workDays,
                         TotalLateDays = lateDays,
                         TotalEarlyLeaveDays = earlyLeaveDays,
@@ -405,9 +403,11 @@ namespace HRM_BE.Data.Repositories
                 .OrderByDescending(d => d.TotalOvertimeHours)
                 .ToList();
 
-            // OT summary from PayrollDetail (money + hours derived from timesheet)
             var otPayrollQuery = _dbContext.PayrollDetails
-                .Where(pd => pd.IsDeleted == false && pd.CreatedAt.HasValue && pd.CreatedAt.Value.Year == year)
+                .Where(pd => pd.IsDeleted == false && 
+                       pd.CreatedAt.HasValue && 
+                       pd.CreatedAt.Value.Year == year &&
+                       (pd.Employee == null || pd.Employee.IsDeleted == false))
                 .AsNoTracking();
 
             if (organizationId.HasValue)
@@ -441,11 +441,11 @@ namespace HRM_BE.Data.Repositories
                 .OrderBy(o => o.Month)
                 .ToList();
 
-            // Leave type distribution
             var leaveQuery = _dbContext.LeaveApplications
                 .Where(la => la.IsDeleted == false
                     && la.Status == Core.Data.Official_Form.LeaveApplicationStatus.Approved
-                    && la.StartDate.HasValue && la.StartDate.Value.Year == year)
+                    && la.StartDate.HasValue && la.StartDate.Value.Year == year
+                    && (la.Employee == null || la.Employee.IsDeleted == false))
                 .AsNoTracking();
 
             if (organizationId.HasValue)
@@ -478,7 +478,7 @@ namespace HRM_BE.Data.Repositories
                 MonthlyAttendances = monthlyAttendances,
                 EmployeeAttendances = employeeAttendances,
                 LeaveTypeDistributions = leaveTypeDistributions,
-                DepartmentAttendances = departmentAttendances,
+                PositionAttendances = positionAttendances,
                 OvertimeSummaries = overtimeSummaries
             };
         }

@@ -1,4 +1,4 @@
-﻿using HRM_BE.Api.Services.Interfaces;
+using HRM_BE.Api.Services.Interfaces;
 using HRM_BE.Core.Constants;
 using HRM_BE.Core.Data.Identity;
 using HRM_BE.Core.Exceptions;
@@ -53,22 +53,14 @@ namespace HRM_BE.Api.Services
                 if (request.PageIndex == null) request.PageIndex = 1;
                 if (request.PageSize == null) request.PageSize = total;
 
-                int totalPages = (int)Math.Ceiling((double)total / request.PageSize);
-
                 var roles = await query
+                    .AsNoTracking()
                     .OrderByDescending(b => b.Id)
                     .Skip((request.PageIndex - 1) * request.PageSize)
                     .Take(request.PageSize)
-                    .Include(r => r.RolePermissions)
-                        .ThenInclude(rp => rp.Permission)
                     .ToListAsync();
 
                 var roleDtos = _mapper.Map<List<RoleDto>>(roles);
-
-                foreach (var roleDto in roleDtos)
-                {
-                    roleDto.Permissions = await _permissionService.GetByRoleId(roleDto.Id);
-                }
 
                 var result = new PagingResult<RoleDto>(roleDtos, request.PageIndex, request.PageSize, total);
 
@@ -89,8 +81,6 @@ namespace HRM_BE.Api.Services
 
                 var role = await query
                     .OrderByDescending(b => b.Id)
-                    .Include(r => r.RolePermissions)
-                        .ThenInclude(rp => rp.Permission)
                     .FirstOrDefaultAsync();
 
                 var roleDto = _mapper.Map<RoleDto>(role);
@@ -121,22 +111,14 @@ namespace HRM_BE.Api.Services
                 if (request.PageIndex == null) request.PageIndex = 1;
                 if (request.PageSize == null) request.PageSize = total;
 
-                int totalPages = (int)Math.Ceiling((double)total / request.PageSize);
-
                 var roles = await query
+                    .AsNoTracking()
                     .OrderByDescending(b => b.Id)
                     .Skip((request.PageIndex - 1) * request.PageSize)
                     .Take(request.PageSize)
-                    .Include(r => r.RolePermissions)
-                        .ThenInclude(rp => rp.Permission)
                     .ToListAsync();
 
                 var roleDtos = _mapper.Map<List<RoleDto>>(roles);
-
-                foreach (var roleDto in roleDtos)
-                {
-                    roleDto.Permissions = await _permissionService.GetByRoleId(roleDto.Id);
-                }
 
                 var result = new PagingResult<RoleDto>(roleDtos, request.PageIndex, request.PageSize, total);
 

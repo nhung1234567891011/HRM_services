@@ -5,7 +5,7 @@ namespace HRM_BE.Core.Models.Report
         public List<MonthlyAttendance> MonthlyAttendances { get; set; } = new();
         public List<EmployeeAttendance> EmployeeAttendances { get; set; } = new();
         public List<LeaveTypeDistribution> LeaveTypeDistributions { get; set; } = new();
-        public List<DepartmentAttendance> DepartmentAttendances { get; set; } = new();
+        public List<PositionAttendance> PositionAttendances { get; set; } = new();
         public List<OvertimeSummary> OvertimeSummaries { get; set; } = new();
     }
 
@@ -26,7 +26,7 @@ namespace HRM_BE.Core.Models.Report
     {
         public int EmployeeId { get; set; }
         public string FullName { get; set; } = string.Empty;
-        public string Department { get; set; } = string.Empty;
+        public string Position { get; set; } = string.Empty;
         public double WorkDays { get; set; }
         public int LateDays { get; set; }
         public int EarlyLeaveDays { get; set; }
@@ -45,10 +45,10 @@ namespace HRM_BE.Core.Models.Report
         public double TotalDays { get; set; }
     }
 
-    public class DepartmentAttendance
+    public class PositionAttendance
     {
-        public int OrganizationId { get; set; }
-        public string OrganizationName { get; set; } = string.Empty;
+        public int StaffPositionId { get; set; }
+        public string PositionName { get; set; } = string.Empty;
         public double TotalWorkDays { get; set; }
         public int TotalLateDays { get; set; }
         public int TotalEarlyLeaveDays { get; set; }

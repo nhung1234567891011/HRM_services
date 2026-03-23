@@ -628,6 +628,9 @@ namespace HRM_BE.Data.Repositories
 
             // Tính lại và lưu mới
             await CalculateAndSavePayrollDetails(payrollId);
+
+            // Cập nhật trạng thái xác nhận của bảng lương tổng (reset về NotSent vì tất cả PayrollDetail mới tạo đều có status NotSent)
+            await UpdatePayrollConfirmationStatus(payrollId);
         }
 
         public async Task Update(int id, UpdatePayrollDetailRequest request)
@@ -851,8 +854,12 @@ namespace HRM_BE.Data.Repositories
                 throw new Exception("Bảng lương đã khóa, không thể xóa phiếu lương.");
             }
 
+            var payrollId = payrollDetail.PayrollId;
             payrollDetail.IsDeleted = true;
             await UpdateAsync(payrollDetail);
+
+            // Cập nhật trạng thái xác nhận của bảng lương tổng
+            await UpdatePayrollConfirmationStatus(payrollId);
         }
 
         public async Task DeleteRange(List<int> ids)
@@ -884,6 +891,12 @@ namespace HRM_BE.Data.Repositories
                 item.IsDeleted = true;
             }
             await UpdateRangeAsync(payrollDetails);
+
+            // Cập nhật trạng thái xác nhận cho tất cả các bảng lương bị ảnh hưởng
+            foreach (var payrollId in payrollIds)
+            {
+                await UpdatePayrollConfirmationStatus(payrollId);
+            }
         }
 
         public async Task<List<PayrollDetailDto>> FetchPayrollDetails(int payrollId)
@@ -937,6 +950,7 @@ namespace HRM_BE.Data.Repositories
                 .Include(p => p.Employee)
                 .ToListAsync();
 
+            int? payrollId = null;
             foreach (var payrollDetail in payrollDetails)
             {
                 if (payrollDetail == null)
@@ -946,10 +960,20 @@ namespace HRM_BE.Data.Repositories
 
                 payrollDetail.ConfirmationStatus = PayrollConfirmationStatusEmployee.Confirming;
                 payrollDetail.ResponseDeadline = request.ResponseDeadline;
-
+                
+                if (!payrollId.HasValue && payrollDetail.PayrollId.HasValue)
+                {
+                    payrollId = payrollDetail.PayrollId.Value;
+                }
             }
 
             await UpdateRangeAsync(payrollDetails);
+
+            // Cập nhật trạng thái xác nhận của bảng lương tổng
+            if (payrollId.HasValue)
+            {
+                await UpdatePayrollConfirmationStatus(payrollId);
+            }
         }
 
         // Nhân viên xác nhận bảng lương
@@ -974,6 +998,8 @@ namespace HRM_BE.Data.Repositories
 
             await UpdateAsync(payrollDetail);
 
+            // Kiểm tra và cập nhật trạng thái xác nhận của bảng lương tổng
+            await UpdatePayrollConfirmationStatus(payrollDetail.PayrollId);
         }
 
         public async Task<List<PayrollDetailEmailSendDto>> GetPayrollDetailEmailSendData(List<int> payrollDetailIds)
@@ -989,6 +1015,68 @@ namespace HRM_BE.Data.Repositories
                 .ToListAsync();
 
             return _mapper.Map<List<PayrollDetailEmailSendDto>>(payrollDetails);
+        }
+
+        /// <summary>
+        /// Cập nhật trạng thái xác nhận của bảng lương tổng dựa trên trạng thái của các nhân viên thuộc phạm vi được tính payroll
+        /// </summary>
+        private async Task UpdatePayrollConfirmationStatus(int? payrollId)
+        {
+            if (!payrollId.HasValue) return;
+
+            var payroll = await _dbContext.Payrolls
+                .FirstOrDefaultAsync(p => p.Id == payrollId.Value && p.IsDeleted != true);
+
+            if (payroll == null) return;
+
+            // Lấy danh sách SummaryTimesheetNameId liên kết với Payroll này
+            var summaryTimesheetNameIds = await _dbContext.PayrollSummaryTimesheets
+                .Where(pst => pst.PayrollId == payrollId)
+                .Select(pst => pst.SummaryTimesheetNameId)
+                .ToListAsync();
+
+            var now = DateTime.Now;
+
+            // Lấy các PayrollDetail của bảng lương này, giới hạn đúng tập nhân viên giống logic tạo payroll details:
+            // - Có hợp đồng còn hạn (ExpiredStatus == false)
+            // - Đã confirm bảng chấm công tổng hợp (Status == Confirm) hoặc đã quá ngày confirm (Date < now)
+            var allPayrollDetails = await _dbContext.PayrollDetails
+                .Where(pd => pd.PayrollId == payrollId.Value && pd.IsDeleted != true)
+                .Where(pd => pd.Employee.Contracts.Any(c => c.ExpiredStatus == false))
+                .Where(pd => pd.Employee.SummaryTimesheetNameEmployeeConfirms.Any(s =>
+                    summaryTimesheetNameIds.Contains(s.SummaryTimesheetNameId) &&
+                    (s.Status == SummaryTimesheetNameEmployeeConfirmStatus.Confirm ||
+                     (s.Date != null && s.Date < now))))
+                .Select(pd => pd.ConfirmationStatus)
+                .ToListAsync();
+
+            if (!allPayrollDetails.Any())
+            {
+                payroll.PayrollConfirmationStatus = PayrollConfirmationStatus.NotSent;
+            }
+            else if (allPayrollDetails.All(status => status == PayrollConfirmationStatusEmployee.Confirmed))
+            {
+                // Tất cả đều đã xác nhận
+                payroll.PayrollConfirmationStatus = PayrollConfirmationStatus.Confirmed;
+            }
+            else if (allPayrollDetails.Any(status => status == PayrollConfirmationStatusEmployee.Confirming))
+            {
+                // Có ít nhất 1 employee đang trong trạng thái Confirming
+                payroll.PayrollConfirmationStatus = PayrollConfirmationStatus.Confirming;
+            }
+            else if (allPayrollDetails.All(status => status == PayrollConfirmationStatusEmployee.NotSent))
+            {
+                // Tất cả đều chưa gửi
+                payroll.PayrollConfirmationStatus = PayrollConfirmationStatus.NotSent;
+            }
+            else
+            {
+                // Các trường hợp khác (có thể có người Rejected)
+                payroll.PayrollConfirmationStatus = PayrollConfirmationStatus.NotConfirmed;
+            }
+
+            _dbContext.Payrolls.Update(payroll);
+            await _dbContext.SaveChangesAsync();
         }
 
     }
