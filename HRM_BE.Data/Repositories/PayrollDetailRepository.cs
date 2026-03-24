@@ -41,20 +41,50 @@ namespace HRM_BE.Data.Repositories
         {
             // Lấy SummaryTimesheetNameIds liên kết với payroll (nếu có) để kiểm tra xác nhận
             List<int?> summaryTimesheetNameIds = new List<int?>();
+            DateTime? periodStartDate = null;
+            DateTime? periodEndDate = null;
+            
             if (payrollId.HasValue)
             {
                 summaryTimesheetNameIds = _dbContext.PayrollSummaryTimesheets
                     .Where(pst => pst.PayrollId == payrollId)
                     .Select(pst => pst.SummaryTimesheetNameId)
                     .ToList();
+
+                // Xác định khoảng thời gian kỳ lương
+                if (summaryTimesheetNameIds.Any())
+                {
+                    var payroll = _dbContext.Payrolls.FirstOrDefault(p => p.Id == payrollId.Value);
+                    var period = _dbContext.SummaryTimesheetNames
+                        .Where(s => summaryTimesheetNameIds.Contains(s.Id))
+                        .Select(s => new
+                        {
+                            MinStartDate = s.SummaryTimesheetNameDetailTimesheetNames
+                                .Min(d => d.DetailTimesheetName.StartDate),
+                            MaxEndDate = s.SummaryTimesheetNameDetailTimesheetNames
+                                .Max(d => d.DetailTimesheetName.EndDate)
+                        })
+                        .FirstOrDefault();
+
+                    if (period != null)
+                    {
+                        var fallback = payroll?.CreatedAt ?? DateTime.Now;
+                        periodStartDate = (period.MinStartDate ?? fallback).Date;
+                        periodEndDate = (period.MaxEndDate ?? fallback).Date;
+                    }
+                }
             }
 
             var now = DateTime.Now;
 
             var query = _dbContext.PayrollDetails
                 .Where(p => p.IsDeleted != true)
-                // Hợp đồng còn hạn
-                .Where(p => p.Employee.Contracts.Any(c => c.ExpiredStatus == false))
+                // Hợp đồng còn hạn - nếu có period thì kiểm tra contract trong khoảng thời gian đó
+                .Where(p => p.Employee.Contracts.Any(c => 
+                    c.ExpiredStatus == false &&
+                    (!periodStartDate.HasValue || !periodEndDate.HasValue ||
+                     (c.EffectiveDate.HasValue && c.EffectiveDate.Value <= periodEndDate.Value &&
+                      (!c.ExpiryDate.HasValue || c.ExpiryDate.Value >= periodStartDate.Value)))))
                 // Đã xác nhận bảng chấm công HOẶC quá ngày xác nhận
                 .Where(p => !summaryTimesheetNameIds.Any() ||
                     p.Employee.SummaryTimesheetNameEmployeeConfirms.Any(s =>
@@ -172,12 +202,17 @@ namespace HRM_BE.Data.Repositories
 
             // 1. Lấy danh sách nhân viên thuộc tổ chức của Payroll
             // Điều kiện:
-            //   - Có hợp đồng còn hạn (ExpiredStatus == false)
+            //   - Có hợp đồng còn hiệu lực trong thời gian của bảng tổng hợp (EffectiveDate <= periodEndDate và (ExpiryDate >= periodStartDate hoặc ExpiryDate == null))
+            //   - Hợp đồng chưa hết hạn (ExpiredStatus == false)
             //   - Đã xác nhận bảng chấm công tổng hợp (Status == Confirm)
             //     HOẶC đã quá ngày xác nhận (Date < now)
             var employees = _dbContext.Employees
                 .Where(e => e.OrganizationId == payroll.OrganizationId)
-                .Where(e => e.Contracts.Any(c => c.EmployeeId == e.Id && c.ExpiredStatus == false))
+                .Where(e => e.Contracts.Any(c => 
+                    c.EmployeeId == e.Id && 
+                    c.ExpiredStatus == false &&
+                    c.EffectiveDate.HasValue && c.EffectiveDate.Value <= periodEndDate &&
+                    (!c.ExpiryDate.HasValue || c.ExpiryDate.Value >= periodStartDate)))
                 .Where(e => e.SummaryTimesheetNameEmployeeConfirms.Any(s =>
                     summaryTimesheetNameIds.Contains(s.SummaryTimesheetNameId) &&
                     (s.Status == SummaryTimesheetNameEmployeeConfirmStatus.Confirm ||
@@ -193,7 +228,15 @@ namespace HRM_BE.Data.Repositories
 
             foreach (var employee in employees)
             {
-                var contract = _dbContext.Contracts.FirstOrDefault(c => c.EmployeeId == employee.Id && c.ExpiredStatus == false);
+                // Lấy contract còn hiệu lực trong khoảng thời gian của bảng tổng hợp
+                // Nếu có nhiều contract, ưu tiên contract có EffectiveDate gần nhất
+                var contract = _dbContext.Contracts
+                    .Where(c => c.EmployeeId == employee.Id && 
+                                c.ExpiredStatus == false &&
+                                c.EffectiveDate.HasValue && c.EffectiveDate.Value <= periodEndDate &&
+                                (!c.ExpiryDate.HasValue || c.ExpiryDate.Value >= periodStartDate))
+                    .OrderByDescending(c => c.EffectiveDate)
+                    .FirstOrDefault();
                 var timesheet = _dbContext.Timesheets.Where(t => t.EmployeeId == employee.Id);
 
                 var employeeTimesheetsInPeriod = timesheet
@@ -1035,14 +1078,46 @@ namespace HRM_BE.Data.Repositories
                 .Select(pst => pst.SummaryTimesheetNameId)
                 .ToListAsync();
 
+            // Xác định khoảng thời gian kỳ lương dựa trên các bảng công tổng hợp
+            DateTime periodStartDate;
+            DateTime periodEndDate;
+
+            if (summaryTimesheetNameIds.Any())
+            {
+                var period = _dbContext.SummaryTimesheetNames
+                    .Where(s => summaryTimesheetNameIds.Contains(s.Id))
+                    .Select(s => new
+                    {
+                        MinStartDate = s.SummaryTimesheetNameDetailTimesheetNames
+                            .Min(d => d.DetailTimesheetName.StartDate),
+                        MaxEndDate = s.SummaryTimesheetNameDetailTimesheetNames
+                            .Max(d => d.DetailTimesheetName.EndDate)
+                    })
+                    .FirstOrDefault();
+
+                var fallback = payroll.CreatedAt ?? DateTime.Now;
+                periodStartDate = (period?.MinStartDate ?? fallback).Date;
+                periodEndDate = (period?.MaxEndDate ?? fallback).Date;
+            }
+            else
+            {
+                var payrollMonth = payroll.CreatedAt ?? DateTime.Now;
+                periodStartDate = new DateTime(payrollMonth.Year, payrollMonth.Month, 1);
+                periodEndDate = periodStartDate.AddMonths(1).AddDays(-1);
+            }
+
             var now = DateTime.Now;
 
             // Lấy các PayrollDetail của bảng lương này, giới hạn đúng tập nhân viên giống logic tạo payroll details:
-            // - Có hợp đồng còn hạn (ExpiredStatus == false)
+            // - Có hợp đồng còn hiệu lực trong thời gian của bảng tổng hợp (EffectiveDate <= periodEndDate và (ExpiryDate >= periodStartDate hoặc ExpiryDate == null))
+            // - Hợp đồng chưa hết hạn (ExpiredStatus == false)
             // - Đã confirm bảng chấm công tổng hợp (Status == Confirm) hoặc đã quá ngày confirm (Date < now)
             var allPayrollDetails = await _dbContext.PayrollDetails
                 .Where(pd => pd.PayrollId == payrollId.Value && pd.IsDeleted != true)
-                .Where(pd => pd.Employee.Contracts.Any(c => c.ExpiredStatus == false))
+                .Where(pd => pd.Employee.Contracts.Any(c => 
+                    c.ExpiredStatus == false &&
+                    c.EffectiveDate.HasValue && c.EffectiveDate.Value <= periodEndDate &&
+                    (!c.ExpiryDate.HasValue || c.ExpiryDate.Value >= periodStartDate)))
                 .Where(pd => pd.Employee.SummaryTimesheetNameEmployeeConfirms.Any(s =>
                     summaryTimesheetNameIds.Contains(s.SummaryTimesheetNameId) &&
                     (s.Status == SummaryTimesheetNameEmployeeConfirmStatus.Confirm ||

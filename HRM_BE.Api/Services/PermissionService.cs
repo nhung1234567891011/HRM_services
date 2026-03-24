@@ -196,15 +196,21 @@ namespace HRM_BE.Api.Services
 
         public async Task<PermissionDto> Create(CreatePermissionRequest request)
         {
-            var permission = _mapper.Map<Permission>(request);
-            permission.CreatedAt = DateTime.Now;
+            try
+            {
+                var permission = _mapper.Map<Permission>(request);
+                permission.CreatedAt = DateTime.Now;
 
-            await _dbContext.Permissions.AddAsync(permission);
-            await _dbContext.SaveChangesAsync();
+                await _dbContext.Permissions.AddAsync(permission);
+                await _dbContext.SaveChangesAsync();
 
-            var permissionDto = _mapper.Map<PermissionDto>(permission);
+                var permissionDto = _mapper.Map<PermissionDto>(permission);
 
-            return permissionDto;
+                return permissionDto;
+            }
+            catch(Exception ex) {
+                throw new ApiException(ex.Message, HttpStatusCodeConstant.InternalServerError, ex);
+            }
 
         }
 
