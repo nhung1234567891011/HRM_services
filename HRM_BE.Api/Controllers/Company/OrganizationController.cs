@@ -103,9 +103,14 @@ namespace HRM_BE.Api.Controllers.Company
         [HttpPost("create")]
         public async Task<IActionResult> Create([FromBody] CreateOrganizationRequest request)
         {
-
-            var createdOrganization = await _unitOfWork.Organizations.Create(request);
-            return Ok(ApiResult<OrganizationDto>.Success("Thêm tổ chức thành công", createdOrganization));
+            try
+            {
+                var createdOrganization = await _unitOfWork.Organizations.Create(request);
+                return Ok(ApiResult<OrganizationDto>.Success("Thêm tổ chức thành công", createdOrganization));
+            } catch(Exception ex)
+            {
+                return StatusCode(500, ex.Message);
+            }
         }
         [HttpPut("update")]
         public async Task<IActionResult> Update(int id, [FromBody] UpdateOrganizationRequest request)
