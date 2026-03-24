@@ -58,61 +58,67 @@ namespace HRM_BE.Data.SeedWorks
 
         public async Task<T> CreateAsync(T entity)
         {
-            T? exist = _dbContext.Set<T>().Find(entity.Id);
-            if (exist != null) { throw new Exception("Record for create already exist"); }
-
-            PropertyInfo? propertyInfoCreateAt = entity.GetType().GetProperty("CreatedAt");
-            if (propertyInfoCreateAt != null)
+            try
             {
-                entity.CreatedAt = DateTime.Now;
-            }
+                T? exist = _dbContext.Set<T>().Find(entity.Id);
+                if (exist != null) { throw new Exception("Record for create already exist"); }
 
-            PropertyInfo? propertyInfoUpdateAt = entity.GetType().GetProperty("UpdatedAt");
-            if (propertyInfoUpdateAt != null)
-            {
-                entity.UpdatedAt = DateTime.Now;
-            }
-
-            PropertyInfo? propertyInfoIsDeleted = entity.GetType().GetProperty("IsDeleted");
-            if (propertyInfoCreateAt != null)
-            {
-                entity.IsDeleted = false;
-            }
-
-
-            var httpContext = _httpContextAccessor.HttpContext;
-
-            if (httpContext != null)
-            {
-                var name = httpContext.User.Claims.FirstOrDefault(x => x.Type == "UserName")?.Value;
-                var id = httpContext.User.Claims.FirstOrDefault(x => x.Type == "Id")?.Value;
-
-                if (!string.IsNullOrEmpty(id))
+                PropertyInfo? propertyInfoCreateAt = entity.GetType().GetProperty("CreatedAt");
+                if (propertyInfoCreateAt != null)
                 {
-                    PropertyInfo? propertyInfoCreatedBy = entity.GetType().GetProperty("CreatedBy");
-                    if (propertyInfoCreatedBy != null)
-                    {
-                        if (int.TryParse(id, out var createdById))
-                        {
-                            propertyInfoCreatedBy.SetValue(entity, createdById);
-                        }
-                        else
-                        {
-                            propertyInfoCreatedBy.SetValue(entity, null); 
-                        }
-                    }
+                    entity.CreatedAt = DateTime.Now;
+                }
 
-                    PropertyInfo? propertyInfoCreatedName = entity.GetType().GetProperty("CreatedName");
-                    if (propertyInfoCreatedName != null)
+                PropertyInfo? propertyInfoUpdateAt = entity.GetType().GetProperty("UpdatedAt");
+                if (propertyInfoUpdateAt != null)
+                {
+                    entity.UpdatedAt = DateTime.Now;
+                }
+
+                PropertyInfo? propertyInfoIsDeleted = entity.GetType().GetProperty("IsDeleted");
+                if (propertyInfoCreateAt != null)
+                {
+                    entity.IsDeleted = false;
+                }
+
+
+                var httpContext = _httpContextAccessor.HttpContext;
+
+                if (httpContext != null)
+                {
+                    var name = httpContext.User.Claims.FirstOrDefault(x => x.Type == "UserName")?.Value;
+                    var id = httpContext.User.Claims.FirstOrDefault(x => x.Type == "Id")?.Value;
+
+                    if (!string.IsNullOrEmpty(id))
                     {
-                        propertyInfoCreatedName.SetValue(entity, name);
+                        PropertyInfo? propertyInfoCreatedBy = entity.GetType().GetProperty("CreatedBy");
+                        if (propertyInfoCreatedBy != null)
+                        {
+                            if (int.TryParse(id, out var createdById))
+                            {
+                                propertyInfoCreatedBy.SetValue(entity, createdById);
+                            }
+                            else
+                            {
+                                propertyInfoCreatedBy.SetValue(entity, null);
+                            }
+                        }
+
+                        PropertyInfo? propertyInfoCreatedName = entity.GetType().GetProperty("CreatedName");
+                        if (propertyInfoCreatedName != null)
+                        {
+                            propertyInfoCreatedName.SetValue(entity, name);
+                        }
                     }
                 }
-            }
 
-            await _dbContext.Set<T>().AddAsync(entity);
-            await SaveChangesAsync();
-            return entity;
+                await _dbContext.Set<T>().AddAsync(entity);
+                await SaveChangesAsync();
+                return entity;
+            }catch (Exception ex)
+            {
+                throw new ApiException(ex.Message, StatusCodes.Status500InternalServerError, ex);
+            }
         }
         public async Task<IList<Key>> CreateRangeAsync(IEnumerable<T> entities)
         {
