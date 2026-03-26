@@ -51,29 +51,38 @@ namespace HRM_BE.Data.Repositories
                 .OrderByDescending(d => d.EmployeeCount)
                 .ToList();
 
-            var staffPositions = await _dbContext.StaffPositions
-                .Where(sp => sp.IsDeleted == false)
-                .Select(sp => new { sp.Id, sp.PositionName })
-                .AsNoTracking()
-                .ToDictionaryAsync(sp => sp.Id, sp => sp.PositionName ?? "Chưa có vị trí");
-
-            var positionDistributions = activeEmployees
-                .GroupBy(e => e.StaffPositionId)
-                .Select(g =>
-                {
-                    var staffPositionId = g.Key ?? 0;
-                    var positionName = g.Key.HasValue && staffPositions.TryGetValue(g.Key.Value, out var name)
-                        ? name
-                        : "Chưa có vị trí";
-
-                    return new PositionDistribution
+            // Thống kê theo vị trí: join StaffPositions (StaffPosition.Id == Employee.StaffPositionId)
+            // rồi count theo PositionName như yêu cầu
+            var positionCounts = await (
+                    from e in _dbContext.Employees.AsNoTracking()
+                    where e.IsDeleted == false
+                          && e.WorkingStatus == WorkingStatus.Active
+                          && (!organizationId.HasValue || e.OrganizationId == organizationId.Value)
+                    join sp in _dbContext.StaffPositions.AsNoTracking().Where(x => x.IsDeleted == false)
+                        on e.StaffPositionId equals sp.Id into spg
+                    from sp in spg.DefaultIfEmpty()
+                    let positionName = sp != null && sp.PositionName != null && sp.PositionName != ""
+                        ? sp.PositionName
+                        : "Chưa có vị trí"
+                    group e by positionName
+                    into g
+                    select new
                     {
-                        StaffPositionId = staffPositionId,
-                        PositionName = positionName,
-                        EmployeeCount = g.Count()
-                    };
+                        PositionName = g.Key,
+                        Value = g.Count()
+                    }
+                )
+                .OrderByDescending(x => x.Value)
+                .ToListAsync();
+
+            var positionDistributions = positionCounts
+                .Select(x => new PositionDistribution
+                {
+                    StaffPositionId = 0,
+                    PositionName = x.PositionName ?? "Chưa có vị trí",
+                    EmployeeCount = x.Value,
+                    Percentage = totalActive > 0 ? Math.Round(x.Value / (double)totalActive * 100, 2) : 0
                 })
-                .OrderByDescending(p => p.EmployeeCount)
                 .ToList();
 
             var statusDistributions = employees
@@ -88,6 +97,7 @@ namespace HRM_BE.Data.Repositories
             return new HrDistributionReportDto
             {
                 TotalEmployees = totalEmployees,
+                TotalActiveEmployees = totalActive,
                 DepartmentDistributions = departmentDistributions,
                 PositionDistributions = positionDistributions,
                 StatusDistributions = statusDistributions
@@ -113,8 +123,9 @@ namespace HRM_BE.Data.Repositories
                     StaffPositionId = pd.Employee != null ? pd.Employee.StaffPositionId : null,
                     PositionName = pd.Employee != null && pd.Employee.StaffPosition != null 
                         ? pd.Employee.StaffPosition.PositionName : "Chưa có vị trí",
-                    pd.BaseSalary,
-                    pd.Bonus,
+                    // "Thực nhận" theo PayrollDetail đã tính từ chấm công (ReceivedSalary/KpiSalary)
+                    BaseSalary = pd.ReceivedSalary,
+                    Bonus = pd.KpiSalary,
                     pd.AllowanceMealTravel,
                     pd.ParkingAmount,
                     pd.CommissionAmount,
@@ -177,7 +188,7 @@ namespace HRM_BE.Data.Repositories
         public async Task<PerformanceReportDto> GetPerformanceReport(int? organizationId, int? year, int? month)
         {
             var payrollQuery = _dbContext.PayrollDetails
-                .Where(pd => pd.IsDeleted == false && 
+                .Where(pd => pd.IsDeleted == false &&
                        (pd.Employee == null || pd.Employee.IsDeleted == false))
                 .AsNoTracking();
 
@@ -196,86 +207,66 @@ namespace HRM_BE.Data.Repositories
                     pd.EmployeeId,
                     pd.FullName,
                     StaffPositionId = pd.Employee != null ? pd.Employee.StaffPositionId : null,
-                    PositionName = pd.Employee != null && pd.Employee.StaffPosition != null 
+                    PositionName = pd.Employee != null && pd.Employee.StaffPosition != null
                         ? pd.Employee.StaffPosition.PositionName : "Chưa có vị trí",
-                    pd.KPI,
-                    pd.KpiPercentage,
-                    pd.ActualWorkDays,
-                    pd.StandardWorkDays
+                    CommissionAmount = pd.CommissionAmount ?? 0m
                 })
                 .ToListAsync();
 
+            // Top 7 nhân viên có hoa hồng cao
             var employeePerformances = payrollData
                 .GroupBy(pd => pd.EmployeeId)
                 .Select(g =>
                 {
                     var first = g.First();
-                    var kpiValues = g.Where(x => x.KPI.HasValue).Select(x => x.KPI!.Value).ToList();
-                    var kpiPctValues = g.Where(x => x.KpiPercentage.HasValue).Select(x => x.KpiPercentage!.Value).ToList();
-                    var avgKpi = kpiValues.Count > 0 ? Math.Round(kpiValues.Average(), 2) : 0;
-                    var avgKpiPct = kpiPctValues.Count > 0 ? Math.Round(kpiPctValues.Average(), 2) : 0;
-                    var totalActual = g.Sum(x => x.ActualWorkDays ?? 0);
-                    var totalStandard = g.Sum(x => (double)(x.StandardWorkDays ?? 0));
+                    var totalCommission = g.Sum(x => x.CommissionAmount);
                     return new EmployeePerformance
                     {
                         EmployeeId = first.EmployeeId ?? 0,
                         FullName = first.FullName ?? "",
                         Position = first.PositionName ?? "Chưa có vị trí",
-                        KpiScore = avgKpi,
-                        KpiPercentage = avgKpiPct,
-                        ActualWorkDays = totalActual,
-                        StandardWorkDays = totalStandard,
-                        WorkEfficiency = totalStandard > 0 ? Math.Round(totalActual / totalStandard * 100, 2) : 0
+                        // Dùng KpiScore để chứa "lương hoa hồng" (CommissionAmount)
+                        KpiScore = totalCommission,
+                        KpiPercentage = 0,
+                        ActualWorkDays = 0,
+                        StandardWorkDays = 0,
+                        WorkEfficiency = 0
                     };
                 })
                 .OrderByDescending(e => e.KpiScore)
+                .Take(7)
                 .ToList();
 
+            // Tổng hoa hồng theo vị trí (dùng cho dashboard)
             var positionPerformances = payrollData
                 .GroupBy(pd => new { pd.StaffPositionId, pd.PositionName })
                 .Select(g =>
                 {
-                    var kpiValues = g.Where(x => x.KPI.HasValue).Select(x => x.KPI!.Value).ToList();
-                    var avgKpi = kpiValues.Count > 0 ? Math.Round(kpiValues.Average(), 2) : 0;
-                    var sortedKpi = kpiValues.OrderBy(x => x).ToList();
-                    var medianKpi = sortedKpi.Count > 0
-                        ? (sortedKpi.Count % 2 == 0
-                            ? Math.Round((sortedKpi[sortedKpi.Count / 2 - 1] + sortedKpi[sortedKpi.Count / 2]) / 2, 2)
-                            : sortedKpi[sortedKpi.Count / 2])
-                        : 0;
-                    var empKpiPcts = g.GroupBy(x => x.EmployeeId)
-                        .Select(eg => eg.Where(x => x.KpiPercentage.HasValue).Select(x => x.KpiPercentage!.Value).DefaultIfEmpty(0).Average())
-                        .ToList();
+                    var employeeCount = g.Select(x => x.EmployeeId).Distinct().Count();
+                    var totalCommission = g.Sum(x => x.CommissionAmount);
+                    var avgCommission = employeeCount > 0 ? Math.Round(totalCommission / employeeCount, 2) : 0;
+
                     return new PositionPerformance
                     {
                         StaffPositionId = g.Key.StaffPositionId ?? 0,
                         PositionName = g.Key.PositionName ?? "Chưa có vị trí",
-                        AverageKpi = avgKpi,
-                        MedianKpi = medianKpi,
-                        EmployeeCount = g.Select(x => x.EmployeeId).Distinct().Count(),
-                        HighPerformers = empKpiPcts.Count(x => x >= 80),
-                        LowPerformers = empKpiPcts.Count(x => x < 50)
+                        // Dùng AverageKpi để chứa "tổng hoa hồng theo vị trí"
+                        AverageKpi = Math.Round(totalCommission, 2),
+                        // MedianKpi giữ "hoa hồng trung bình theo nhân viên" (nếu cần)
+                        MedianKpi = avgCommission,
+                        EmployeeCount = employeeCount,
+                        HighPerformers = 0,
+                        LowPerformers = 0
                     };
                 })
-                .OrderByDescending(d => d.AverageKpi)
+                .OrderByDescending(p => p.AverageKpi)
                 .ToList();
-
-            var employeeKpiPcts = employeePerformances.Select(e => (double)e.KpiPercentage).ToList();
-            var totalEmpCount = employeeKpiPcts.Count;
-            var kpiDistributions = new List<KpiDistribution>
-            {
-                new KpiDistribution { RangeLabel = "0-20%", Count = employeeKpiPcts.Count(x => x < 20), Percentage = totalEmpCount > 0 ? Math.Round(employeeKpiPcts.Count(x => x < 20) / (double)totalEmpCount * 100, 2) : 0 },
-                new KpiDistribution { RangeLabel = "20-40%", Count = employeeKpiPcts.Count(x => x >= 20 && x < 40), Percentage = totalEmpCount > 0 ? Math.Round(employeeKpiPcts.Count(x => x >= 20 && x < 40) / (double)totalEmpCount * 100, 2) : 0 },
-                new KpiDistribution { RangeLabel = "40-60%", Count = employeeKpiPcts.Count(x => x >= 40 && x < 60), Percentage = totalEmpCount > 0 ? Math.Round(employeeKpiPcts.Count(x => x >= 40 && x < 60) / (double)totalEmpCount * 100, 2) : 0 },
-                new KpiDistribution { RangeLabel = "60-80%", Count = employeeKpiPcts.Count(x => x >= 60 && x < 80), Percentage = totalEmpCount > 0 ? Math.Round(employeeKpiPcts.Count(x => x >= 60 && x < 80) / (double)totalEmpCount * 100, 2) : 0 },
-                new KpiDistribution { RangeLabel = "80-100%", Count = employeeKpiPcts.Count(x => x >= 80), Percentage = totalEmpCount > 0 ? Math.Round(employeeKpiPcts.Count(x => x >= 80) / (double)totalEmpCount * 100, 2) : 0 },
-            };
 
             return new PerformanceReportDto
             {
                 EmployeePerformances = employeePerformances,
                 PositionPerformances = positionPerformances,
-                KpiDistributions = kpiDistributions
+                KpiDistributions = new List<KpiDistribution>()
             };
         }
 

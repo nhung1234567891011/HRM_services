@@ -3,6 +3,7 @@ namespace HRM_BE.Core.Models.Report
     public class HrDistributionReportDto
     {
         public int TotalEmployees { get; set; }
+        public int TotalActiveEmployees { get; set; }
         public List<DepartmentDistribution> DepartmentDistributions { get; set; } = new();
         public List<PositionDistribution> PositionDistributions { get; set; } = new();
         public List<StatusDistribution> StatusDistributions { get; set; } = new();
@@ -21,6 +22,7 @@ namespace HRM_BE.Core.Models.Report
         public int StaffPositionId { get; set; }
         public string PositionName { get; set; } = string.Empty;
         public int EmployeeCount { get; set; }
+        public double Percentage { get; set; }
     }
 
     public class StatusDistribution
