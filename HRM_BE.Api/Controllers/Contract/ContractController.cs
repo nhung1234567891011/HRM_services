@@ -139,6 +139,15 @@ namespace HRM_BE.Api.Controllers.Profile
         public async Task<IActionResult> Update(int id, [FromForm]  UpdateContractRequest request)
         {
             var contract = await _unitOfWork.Contracts.GetByIdAsync(id);
+            if (contract == null)
+            {
+                throw new BadHttpRequestException("Không tìm thấy hợp đồng cần cập nhật.");
+            }
+
+            if (contract.ExpiredStatus == true)
+            {
+                throw new BadHttpRequestException("Hợp đồng đã chấm dứt/hết hiệu lực, không được chỉnh sửa thông tin chính.");
+            }
 
             if (request.AttachmentFile?.Length > 0)
             {
@@ -171,6 +180,17 @@ namespace HRM_BE.Api.Controllers.Profile
         [HttpPut("update-expired-status")]
         public async Task<IActionResult> UpdateExpiredStatus(int id, [FromBody] UpdateContractExpiredStatusRequest request)
         {
+            var contract = await _unitOfWork.Contracts.GetByIdAsync(id);
+            if (contract == null)
+            {
+                throw new BadHttpRequestException("Không tìm thấy hợp đồng cần chấm dứt.");
+            }
+
+            if (contract.ExpiredStatus == true)
+            {
+                throw new BadHttpRequestException("Hợp đồng đã ở trạng thái hết hiệu lực, không thể chấm dứt lại.");
+            }
+
             await _unitOfWork.Contracts.UpdateExpiredStatus(id, request);
             return Ok(ApiResult<bool>.Success("Cập nhật trạng thái hợp đồng thành công", true));
         }

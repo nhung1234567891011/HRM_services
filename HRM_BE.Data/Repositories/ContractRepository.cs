@@ -120,13 +120,24 @@ namespace HRM_BE.Data.Repositories
         public async Task Update(int id, UpdateContractRequest request)
         {
             var entity = await GetContractAndCheckExsit(id);
+            EnsureContractCanBeEdited(entity);
             await UpdateAsync(_mapper.Map(request, entity));
         }
 
         public async Task UpdateExpiredStatus(int id, UpdateContractExpiredStatusRequest request)
         {
             var entity = await GetContractAndCheckExsit(id);
+
+            if (entity.ExpiredStatus == true)
+                throw new BadHttpRequestException("Hợp đồng đã ở trạng thái hết hiệu lực, không thể chấm dứt lại.");
+
             await UpdateAsync(_mapper.Map(request, entity));
+        }
+
+        private static void EnsureContractCanBeEdited(DataContract contract)
+        {
+            if (contract.ExpiredStatus == true)
+                throw new BadHttpRequestException("Hợp đồng đã chấm dứt/hết hiệu lực, không được chỉnh sửa thông tin chính.");
         }
 
         private async Task<DataContract> GetContractAndCheckExsit(int contractId)

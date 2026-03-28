@@ -83,37 +83,103 @@ namespace HRM_BE.Data.Repositories
         {
             try
             {
+                // Include DetailTimesheetNameStaffPositions để tránh N+1 query problem
                 var query = _dbContext.DetailTimesheetNames
-                    .Include(s => s.Organization).AsSplitQuery().AsNoTracking();
+                    .Include(s => s.Organization)
+                    .Include(s => s.DetailTimesheetNameStaffPositions)
+                    .ThenInclude(sp => sp.StaffPosition)
+                    .AsSplitQuery()
+                    .AsNoTracking();
 
+                // Filter by name (Timekeeping Sheet Name)
                 if (!string.IsNullOrEmpty(name))
-                    query = query.Where(c => c.TimekeepingSheetName.Contains(name));
+                {
+                    var nameTrimmed = name.Trim();
+                    query = query.Where(c => c.TimekeepingSheetName.Contains(nameTrimmed));
+                }
 
-                // Only call GetAllChildOrganizationIds if organizationId has a value
+                // Filter by organization and its descendants
                 List<int>? organizationDescendantIds = null;
                 if (organizationId.HasValue)
                 {
                     organizationDescendantIds = await GetAllChildOrganizationIds(organizationId.Value);
                     organizationDescendantIds.Add(organizationId.Value);
-                    query = query.Where(c => organizationDescendantIds.Contains(c.OrganizationId.Value));
+                    query = query.Where(c => c.OrganizationId.HasValue && organizationDescendantIds.Contains(c.OrganizationId.Value));
                 }
 
+                // Filter by staff positions (if multiple, comma-separated)
                 if (!string.IsNullOrEmpty(staffPositionIds))
                 {
-                    var staffpositionIds = staffPositionIds.Split(',').Select(id => int.Parse(id)).ToList();
-                    query = query.Where(c => c.DetailTimesheetNameStaffPositions.Any(p => staffpositionIds.Contains(p.StaffPosition.Id)));
+                    var staffpositionIdList = staffPositionIds.Split(',')
+                        .Where(x => !string.IsNullOrWhiteSpace(x))
+                        .Select(id => int.Parse(id.Trim()))
+                        .ToList();
+                    
+                    if (staffpositionIdList.Count > 0)
+                    {
+                        query = query.Where(c => c.DetailTimesheetNameStaffPositions.Any(p => staffpositionIdList.Contains(p.StaffPosition.Id)));
+                    }
                 }
 
-                if (month.HasValue)
-                    query = query.Where(c => c.EndDate.Value.Month >= month || c.StartDate.Value.Month <= month);
-
+                // Filter by month and/or year - FIXED LOGIC:
+                // If both year and month are provided:
+                //   - StartDate should be <= target month of target year
+                //   - EndDate should be >= target month of target year
+                // If only year is provided:
+                //   - Date range should overlap with the year
                 if (year.HasValue)
-                    query = query.Where(c => c.EndDate.Value.Year >= year || c.StartDate.Value.Year <= year);
+                {
+                    // Ensure valid year
+                    int targetYear = year.Value;
+                    
+                    if (month.HasValue && month.Value >= 1 && month.Value <= 12)
+                    {
+                        // Both year and month provided: check if date range contains this specific month-year
+                        // e.g., if target = Jan 2024, we need StartDate <= Jan 1, 2024 AND EndDate >= Jan 31, 2024
+                        var targetMonthStart = new DateTime(targetYear, month.Value, 1);
+                        var targetMonthEnd = new DateTime(targetYear, month.Value, DateTime.DaysInMonth(targetYear, month.Value));
+                        
+                        query = query.Where(c => 
+                            c.StartDate.HasValue && c.EndDate.HasValue &&
+                            c.StartDate.Value.Date <= targetMonthEnd &&
+                            c.EndDate.Value.Date >= targetMonthStart);
+                    }
+                    else
+                    {
+                        // Only year provided: check if date range overlaps with this year
+                        var yearStart = new DateTime(targetYear, 1, 1);
+                        var yearEnd = new DateTime(targetYear, 12, 31);
+                        
+                        query = query.Where(c => 
+                            c.StartDate.HasValue && c.EndDate.HasValue &&
+                            c.StartDate.Value.Date <= yearEnd &&
+                            c.EndDate.Value.Date >= yearStart);
+                    }
+                }
+                else if (month.HasValue && month.Value >= 1 && month.Value <= 12)
+                {
+                    // Only month provided (no year): check if any record has a range covering this month
+                    // This is less common and might need clarification on business logic
+                    var currentYear = DateTime.Now.Year;
+                    var targetMonthStart = new DateTime(currentYear, month.Value, 1);
+                    var targetMonthEnd = new DateTime(currentYear, month.Value, DateTime.DaysInMonth(currentYear, month.Value));
+                    
+                    query = query.Where(c => 
+                        c.StartDate.HasValue && c.EndDate.HasValue &&
+                        c.StartDate.Value.Date <= targetMonthEnd &&
+                        c.EndDate.Value.Date >= targetMonthStart);
+                }
 
+                // Applied sorting
                 query = query.ApplySorting(sortBy, orderBy);
+                
+                // Count total records before paging
                 int total = await query.CountAsync();
+                
+                // Apply paging
                 query = query.ApplyPaging(pageIndex, pageSize);
 
+                // Map to DTO
                 var data = await _mapper.ProjectTo<DetailTimeSheetDto>(query).ToListAsync();
                 return new PagingResult<DetailTimeSheetDto>(data, pageIndex, pageSize, sortBy, orderBy, total);
             }
@@ -615,33 +681,86 @@ namespace HRM_BE.Data.Repositories
             var query = _dbContext.DetailTimesheetNames
                 .Where(d => !_dbContext.SummaryTimesheetNameDetailTimesheetNames.Any(s => s.DetailTimesheetNameId == d.Id)) // lọc những id chưa tồn tại trong chấm công tổng hợp
             //.Where( d => !detailTimesheetNameids.Contains(d.Id))
-                .Include(s => s.Organization).AsSplitQuery().AsNoTracking();
+                .Include(s => s.Organization)
+                .Include(s => s.DetailTimesheetNameStaffPositions)
+                .ThenInclude(sp => sp.StaffPosition)
+                .AsSplitQuery()
+                .AsNoTracking();
+            
+            // Filter by name
             if (!string.IsNullOrEmpty(name))
             {
-                query = query.Where(c => c.TimekeepingSheetName.Contains(name));
+                var nameTrimmed = name.Trim();
+                query = query.Where(c => c.TimekeepingSheetName.Contains(nameTrimmed));
             }
+            
+            // Filter by organization (no descendants iteration here based on current logic)
             if (organizationId.HasValue)
             {
                 query = query.Where(c => c.OrganizationId == organizationId);
             }
+            
+            // Filter by staff positions
             if (!string.IsNullOrEmpty(staffPositionIds))
             {
-                var staffpositionIds = staffPositionIds.Split(',').Select(id => int.Parse(id)).ToList();
-
-                query = query.Where(c => c.DetailTimesheetNameStaffPositions.Any(p => staffpositionIds.Contains(p.StaffPosition.Id)));
+                var staffpositionIdList = staffPositionIds.Split(',')
+                    .Where(x => !string.IsNullOrWhiteSpace(x))
+                    .Select(id => int.Parse(id.Trim()))
+                    .ToList();
+                
+                if (staffpositionIdList.Count > 0)
+                {
+                    query = query.Where(c => c.DetailTimesheetNameStaffPositions.Any(p => staffpositionIdList.Contains(p.StaffPosition.Id)));
+                }
             }
-            if (month.HasValue)
-            {
-                query = query.Where(c => c.EndDate.Value.Month >= month);
-            }
+            
+            // Filter by month and/or year - FIXED LOGIC (same as Paging)
             if (year.HasValue)
             {
-                query = query.Where(c => c.EndDate.Value.Year >= year);
+                int targetYear = year.Value;
+                
+                if (month.HasValue && month.Value >= 1 && month.Value <= 12)
+                {
+                    // Both year and month provided
+                    var targetMonthStart = new DateTime(targetYear, month.Value, 1);
+                    var targetMonthEnd = new DateTime(targetYear, month.Value, DateTime.DaysInMonth(targetYear, month.Value));
+                    
+                    query = query.Where(c => 
+                        c.StartDate.HasValue && c.EndDate.HasValue &&
+                        c.StartDate.Value.Date <= targetMonthEnd &&
+                        c.EndDate.Value.Date >= targetMonthStart);
+                }
+                else
+                {
+                    // Only year provided
+                    var yearStart = new DateTime(targetYear, 1, 1);
+                    var yearEnd = new DateTime(targetYear, 12, 31);
+                    
+                    query = query.Where(c => 
+                        c.StartDate.HasValue && c.EndDate.HasValue &&
+                        c.StartDate.Value.Date <= yearEnd &&
+                        c.EndDate.Value.Date >= yearStart);
+                }
             }
+            else if (month.HasValue && month.Value >= 1 && month.Value <= 12)
+            {
+                // Only month provided (no year)
+                var currentYear = DateTime.Now.Year;
+                var targetMonthStart = new DateTime(currentYear, month.Value, 1);
+                var targetMonthEnd = new DateTime(currentYear, month.Value, DateTime.DaysInMonth(currentYear, month.Value));
+                
+                query = query.Where(c => 
+                    c.StartDate.HasValue && c.EndDate.HasValue &&
+                    c.StartDate.Value.Date <= targetMonthEnd &&
+                    c.EndDate.Value.Date >= targetMonthStart);
+            }
+            
             // Áp dụng sắp xếp
             query = query.ApplySorting(sortBy, orderBy);
+            
             // Tính tổng số bản ghi
             int total = await query.CountAsync();
+            
             // Áp dụng phân trang
             query = query.ApplyPaging(pageIndex, pageSize);
 

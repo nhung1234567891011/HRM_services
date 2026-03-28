@@ -21,6 +21,7 @@ namespace HRM_BE.Api.Controllers.Identity
     [ApiController]
     public class AuthController : ControllerBase
     {
+        private const string ActivationCompanyName = "CÔNG TY TNHH XUẤT NHẬP KHẨU HỮU CƠ VIỆT NAM EUCHOICE";
 
         private readonly UserManager<User> _userManager;
         private readonly SignInManager<User> _signInManager;
@@ -37,6 +38,49 @@ namespace HRM_BE.Api.Controllers.Identity
             _authService = authService;
             _userService = userService;
             _mapper = mapper;
+        }
+
+        private static string BuildActivationLink(string urlClient, string email, string activationCode)
+        {
+            return $"{urlClient}/auth/set-password?email={Uri.EscapeDataString(email)}&activationCode={Uri.EscapeDataString(activationCode)}";
+        }
+
+        private static string BuildActivationMailSubject()
+        {
+            return $"Kích hoạt tài khoản hệ thống HRM - {ActivationCompanyName}";
+        }
+
+        private static string BuildActivationMailBody(User user, string activationLink)
+        {
+            return $@"
+                <div style='margin: 0 auto; max-width: 640px; background: #ffffff; border: 1px solid #dbe4ef; border-radius: 14px; overflow: hidden; font-family: Tahoma, Arial, sans-serif; color: #1f2937;'>
+                    <div style='padding: 22px 24px; background: linear-gradient(135deg, #14532d 0%, #166534 55%, #15803d 100%);'>
+                        <h2 style='margin: 0; color: #ffffff; font-size: 21px; font-weight: 700;'>Kích hoạt tài khoản HRM</h2>
+                        <p style='margin: 8px 0 0 0; color: #dcfce7; font-size: 13px;'>{ActivationCompanyName}</p>
+                    </div>
+
+                    <div style='padding: 24px;'>
+                        <p style='margin: 0 0 12px 0; font-size: 16px; font-weight: 600;'>Kính gửi: Anh/Chị {user.Name},</p>
+                        <p style='margin: 0 0 16px 0; font-size: 14px; line-height: 1.7;'>
+                            Tài khoản của Anh/Chị đã được tạo trên hệ thống HRM. Vui lòng nhấn nút bên dưới để thiết lập mật khẩu và kích hoạt tài khoản.
+                        </p>
+
+                        <div style='background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 14px 16px; margin-bottom: 20px;'>
+                            <p style='margin: 0; font-size: 13px; color: #334155;'><strong>Tài khoản đăng nhập:</strong> {user.Email}</p>
+                            <p style='margin: 8px 0 0 0; font-size: 13px; color: #b45309;'>Lưu ý: Liên kết kích hoạt có hiệu lực trong 24 giờ.</p>
+                        </div>
+
+                        <div style='text-align: center; margin: 22px 0;'>
+                            <a href='{activationLink}' target='_blank' style='display: inline-block; padding: 12px 30px; border-radius: 999px; background: linear-gradient(135deg, #14532d 0%, #15803d 100%); color: #ffffff; text-decoration: none; font-size: 15px; font-weight: 700;'>
+                                Kích hoạt ngay
+                            </a>
+                        </div>
+
+                        <p style='margin: 0; font-size: 13px; color: #64748b;'>Nếu Anh/Chị không thực hiện yêu cầu này, vui lòng bỏ qua email.</p>
+                        <p style='margin: 16px 0 0 0; font-size: 14px;'>Trân trọng,<br><strong>{ActivationCompanyName}</strong></p>
+                    </div>
+                </div>
+            ";
         }
 
         [HttpPost]
@@ -272,27 +316,11 @@ namespace HRM_BE.Api.Controllers.Identity
             }
 
             // Tạo link kích hoạt
-            var activationLink = $"{request.UrlClient}/auth/set-password?email={user.Email}&activationCode={user.ActivationCode}";
+            var activationLink = BuildActivationLink(request.UrlClient, user.Email, user.ActivationCode);
 
-            string subject = "Kích hoạt tài khoản hệ thống HRM - CÔNG TY CÔNG NGHỆ VÀ TRUYỀN THÔNG SMO MEDIA";
+            string subject = BuildActivationMailSubject();
 
-            string body = $@"
-                <div style='width: 95%; background-color: white; border: 5px solid #ddd; border-radius: 10px; padding: 20px; font-family: Arial, sans-serif; color: #333;'>
-                    <p style='font-size: 18px; font-weight: bold;'>Kính gửi: Anh/Chị {user.Name},</p>
-                    <p>Vui lòng chọn kích hoạt ngay để đăng nhập hệ thống</p>
-                    <p style='margin-top: 15px; margin-bottom: 15px;'>
-                        <strong>Tài khoản đăng nhập:</strong> {user.Email}<br>
-                        <span style='margin-top: 15px; color: #888; font-size: 14px;'>Lưu ý: Email này có hiệu lực trong 24 giờ.</span>
-                    </p>
-                    <div style='text-align: center; margin-top: 20px; margin-bottom: 20px;'>
-                    <a href='{activationLink}' target='_blank'
-                        style='display: inline-block; padding: 15px 30px; font-size: 16px; font-weight: bold; color: white; background-color: #2a2986; text-decoration: none; border-radius: 5px; cursor: pointer;'>
-                        Kích hoạt ngay
-                    </a>
-                     </div>
-                    <p style='margin-top: 15px; margin-bottom: 15px;'>Trân trọng,<br><strong>SMO Media</strong></p>
-                </div>
-            ";
+            string body = BuildActivationMailBody(user, activationLink);
 
             Task.Run(() => _authService.SendOtpMail(user.Email, subject, body));
 
@@ -386,27 +414,11 @@ namespace HRM_BE.Api.Controllers.Identity
                 }
 
                 // Tạo link kích hoạt
-                var activationLink = $"{request.UrlClient}/auth/set-password?email={user.Email}&activationCode={user.ActivationCode}";
+                var activationLink = BuildActivationLink(request.UrlClient, user.Email, user.ActivationCode);
 
-                string subject = "Kích hoạt tài khoản hệ thống HRM - CÔNG TY CÔNG NGHỆ VÀ TRUYỀN THÔNG SMO MEDIA";
+                string subject = BuildActivationMailSubject();
 
-                string body = $@"
-            <div style='width: 95%; background-color: white; border: 5px solid #ddd; border-radius: 10px; padding: 20px; font-family: Arial, sans-serif; color: #333;'>
-                <p style='font-size: 18px; font-weight: bold;'>Kính gửi: Anh/Chị {user.Name},</p>
-                <p>Vui lòng chọn kích hoạt ngay để đăng nhập hệ thống</p>
-                <p style='margin-top: 15px; margin-bottom: 15px;'>
-                    <strong>Tài khoản đăng nhập:</strong> {user.Email}<br>
-                    <span style='margin-top: 15px; color: #888; font-size: 14px;'>Lưu ý: Email này có hiệu lực trong 24 giờ.</span>
-                </p>
-                <div style='text-align: center; margin-top: 20px; margin-bottom: 20px;'>
-                <a href='{activationLink}' target='_blank'
-                    style='display: inline-block; padding: 15px 30px; font-size: 16px; font-weight: bold; color: white; background-color: #2a2986; text-decoration: none; border-radius: 5px; cursor: pointer;'>
-                    Kích hoạt ngay
-                </a>
-                 </div>
-                <p style='margin-top: 15px; margin-bottom: 15px;'>Trân trọng,<br><strong>SMO Media</strong></p>
-            </div>
-        ";
+                string body = BuildActivationMailBody(user, activationLink);
 
                 Task.Run(() => _authService.SendOtpMail(user.Email, subject, body));
 
@@ -556,26 +568,11 @@ namespace HRM_BE.Api.Controllers.Identity
                 await _userManager.UpdateAsync(user);
 
                 // Tạo link kích hoạt
-                var activationLink = $"{request.UrlClient}/auth/set-password?email={user.Email}&activationCode={user.ActivationCode}";
+                var activationLink = BuildActivationLink(request.UrlClient, user.Email, user.ActivationCode);
 
                 // Gửi email kích hoạt lại cho người dùng
-                string subject = "Kích hoạt tài khoản hệ thống HRM - CÔNG TY CÔNG NGHỆ VÀ TRUYỀN THÔNG SMO MEDIA";
-                string body = $@"
-            <div style='width: 95%; background-color: white; border: 5px solid #ddd; border-radius: 10px; padding: 20px; font-family: Arial, sans-serif; color: #333;'>
-                <p style='font-size: 18px; font-weight: bold;'>Kính gửi: Anh/Chị {user.Name},</p>
-                <p>Vui lòng chọn kích hoạt ngay để đăng nhập hệ thống</p>
-                <p style='margin-top: 15px; margin-bottom: 15px;'>
-                    <strong>Tài khoản đăng nhập:</strong> {user.Email}<br>
-                    <span style='margin-top: 15px; color: #888; font-size: 14px;'>Lưu ý: Email này có hiệu lực trong 24 giờ.</span>
-                </p>
-                <div style='text-align: center; margin-top: 20px; margin-bottom: 20px;'>
-                    <a href='{activationLink}' target='_blank'
-                        style='display: inline-block; padding: 15px 30px; font-size: 16px; font-weight: bold; color: white; background-color: #2a2986; text-decoration: none; border-radius: 5px; cursor: pointer;'>
-                        Kích hoạt ngay
-                    </a>
-                </div>
-                <p style='margin-top: 15px; margin-bottom: 15px;'>Trân trọng,<br><strong>SMO Media</strong></p>
-            </div>";
+                string subject = BuildActivationMailSubject();
+                string body = BuildActivationMailBody(user, activationLink);
 
                 Task.Run(() => _authService.SendOtpMail(user.Email, subject, body));
 
@@ -671,7 +668,7 @@ namespace HRM_BE.Api.Controllers.Identity
             var otpCode = await _userManager.GenerateChangePhoneNumberTokenAsync(user, user?.PhoneNumber);
 
 
-            string subject = "CÔNG TY CÔNG NGHỆ VÀ TRUYỀN THÔNG SMO MEDIA";
+            string subject = ActivationCompanyName;
             string body = "Mã OTP của bạn là: " + otpCode;
 
             //var FormatPhoneNumber = "+84" + user.PhoneNumber.Substring(1);
