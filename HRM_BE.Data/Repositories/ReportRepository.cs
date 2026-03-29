@@ -213,7 +213,7 @@ namespace HRM_BE.Data.Repositories
                 })
                 .ToListAsync();
 
-            // Top 7 nhân viên có hoa hồng cao
+            // Top 10 nhân viên có hoa hồng cao
             var employeePerformances = payrollData
                 .GroupBy(pd => pd.EmployeeId)
                 .Select(g =>
@@ -234,7 +234,7 @@ namespace HRM_BE.Data.Repositories
                     };
                 })
                 .OrderByDescending(e => e.KpiScore)
-                .Take(7)
+                .Take(10)
                 .ToList();
 
             // Tổng hoa hồng theo vị trí (dùng cho dashboard)
