@@ -198,18 +198,6 @@ namespace HRM_BE.Api.Services
         {
             try
             {
-                if (!request.ParentPermissionId.HasValue)
-                {
-                    throw new ApiException("Thiếu quyền cha", HttpStatusCodeConstant.BadRequest);
-                }
-
-                var parentPermission = await _dbContext.Permissions
-                    .FirstOrDefaultAsync(p => p.Id == request.ParentPermissionId.Value);
-                if (parentPermission == null)
-                {
-                    throw new ApiException("Không tìm thấy quyền cha", HttpStatusCodeConstant.BadRequest);
-                }
-
                 var permission = _mapper.Map<Permission>(request);
                 permission.Name = request.Name?.Trim();
                 permission.DisplayName = request.DisplayName?.Trim();
