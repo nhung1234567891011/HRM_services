@@ -1,6 +1,8 @@
 using AutoMapper;
 using HRM_BE.Core.Data.Payroll_Timekeeping.LeaveRegulation;
 using HRM_BE.Core.Data.Payroll_Timekeeping.Payroll;
+using HRM_BE.Core.Data.Payroll_Timekeeping.Shift;
+using HRM_BE.Core.Data.Staff;
 using HRM_BE.Core.Exceptions;
 using HRM_BE.Core.Extension;
 using HRM_BE.Core.IRepositories;
@@ -31,18 +33,99 @@ namespace HRM_BE.Data.Repositories
         {
             if (request.SummaryTimesheetNameIds != null && request.SummaryTimesheetNameIds.Any())
             {
+                var summaryTimesheetNameIds = request.SummaryTimesheetNameIds
+                    .Distinct()
+                    .ToList();
+
                 var alreadyLinkedIds = await _dbContext.Set<PayrollSummaryTimesheet>()
-                    .Where(pst => pst.SummaryTimesheetNameId.HasValue
-                                  && request.SummaryTimesheetNameIds.Contains(pst.SummaryTimesheetNameId.Value)
-                                  && pst.Payroll != null
+                    .Where(pst => pst.SummaryTimesheetNameId != null
+                                  && summaryTimesheetNameIds.Contains(pst.SummaryTimesheetNameId.Value)
                                   && pst.Payroll.IsDeleted != true)
-                    .Select(pst => pst.SummaryTimesheetNameId.Value)
+                    .Select(pst => pst.SummaryTimesheetNameId!.Value)
                     .Distinct()
                     .ToListAsync();
 
                 if (alreadyLinkedIds.Any())
                 {
                     throw new Exception("Bảng chấm công tổng hợp này đã được chuyển sang tính lương trước đó.");
+                }
+
+                var summaryTimesheets = await _dbContext.SummaryTimesheetNames
+                    .Where(stn => summaryTimesheetNameIds.Contains(stn.Id) && stn.IsDeleted != true)
+                    .Select(stn => new
+                    {
+                        stn.Id,
+                        stn.OrganizationId,
+                        StaffPositionIds = stn.SummaryTimesheetNameStaffPositions
+                            .Where(sp => sp.StaffPositionId.HasValue)
+                            .Select(sp => sp.StaffPositionId!.Value)
+                            .Distinct()
+                            .ToList()
+                    })
+                    .ToListAsync();
+
+                var missingSummaryIds = summaryTimesheetNameIds
+                    .Except(summaryTimesheets.Select(x => x.Id))
+                    .ToList();
+
+                if (missingSummaryIds.Any())
+                {
+                    throw new ApiException("Không tìm thấy bảng chấm công tổng hợp để chuyển tính lương.");
+                }
+
+                foreach (var summary in summaryTimesheets)
+                {
+                    if (!summary.OrganizationId.HasValue)
+                    {
+                        throw new ApiException("Bảng chấm công tổng hợp chưa có đơn vị áp dụng.");
+                    }
+
+                    var organizationId = summary.OrganizationId.Value;
+                    var organizationDescendantIds = await GetAllChildOrganizationIds(organizationId);
+                    organizationDescendantIds.Add(organizationId);
+
+                    var employeeQuery = _dbContext.Employees
+                        .Where(e => e.AccountStatus == AccountStatus.Active
+                                    && e.OrganizationId.HasValue
+                                    && organizationDescendantIds.Contains(e.OrganizationId.Value)
+                                    && e.Contracts.Count(c => c.ExpiredStatus == false) == 1);
+
+                    if (summary.StaffPositionIds.Any())
+                    {
+                        employeeQuery = employeeQuery.Where(e => e.StaffPositionId.HasValue && summary.StaffPositionIds.Contains(e.StaffPositionId.Value));
+                    }
+
+                    var employeeIds = await employeeQuery
+                        .Select(e => e.Id)
+                        .ToListAsync();
+
+                    if (!employeeIds.Any())
+                    {
+                        throw new ApiException("Bảng chấm công tổng hợp không có dữ liệu nhân sự để chuyển tính lương.");
+                    }
+
+                    var latestConfirmStatuses = await _dbContext.SummaryTimesheetNameEmployeeConfirms
+                        .Where(c => c.SummaryTimesheetNameId == summary.Id
+                                    && c.EmployeeId.HasValue
+                                    && employeeIds.Contains(c.EmployeeId.Value)
+                                    && c.IsDeleted != true)
+                        .GroupBy(c => c.EmployeeId!.Value)
+                        .Select(g => new
+                        {
+                            EmployeeId = g.Key,
+                            Status = g.OrderByDescending(x => x.UpdatedAt ?? x.CreatedAt)
+                                      .Select(x => x.Status)
+                                      .FirstOrDefault()
+                        })
+                        .ToListAsync();
+
+                    var hasMissingConfirmation = latestConfirmStatuses.Count != employeeIds.Count;
+                    var hasNotConfirmedStatus = latestConfirmStatuses.Any(x => x.Status != SummaryTimesheetNameEmployeeConfirmStatus.Confirm);
+
+                    if (hasMissingConfirmation || hasNotConfirmedStatus)
+                    {
+                        throw new ApiException("Chi tiết chấm công chưa được xác nhận hết, không thể chuyển tính lương.");
+                    }
                 }
             }
 
@@ -90,6 +173,25 @@ namespace HRM_BE.Data.Repositories
 
             await CreateAsync(entity);
             return _mapper.Map<PayrollDto>(entity);
+        }
+
+        private async Task<List<int>> GetAllChildOrganizationIds(int parentId)
+        {
+            var allOrganizations = await _dbContext.Organizations.AsNoTracking().ToListAsync();
+            var result = new List<int>();
+            GetChildIdsRecursive(parentId, allOrganizations, result);
+            return result;
+        }
+
+        private static void GetChildIdsRecursive(int parentId, List<Core.Data.Company.Organization> allOrganizations, List<int> result)
+        {
+            var children = allOrganizations.Where(o => o.OrganizatioParentId == parentId).ToList();
+
+            foreach (var child in children)
+            {
+                result.Add(child.Id);
+                GetChildIdsRecursive(child.Id, allOrganizations, result);
+            }
         }
 
         public async Task Delete(int id)

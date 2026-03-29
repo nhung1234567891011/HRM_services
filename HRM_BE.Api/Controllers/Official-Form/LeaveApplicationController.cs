@@ -267,7 +267,15 @@ namespace HRM_BE.Api.Controllers.Official_Form
 
             var leaveApplication = await _dbContext.LeaveApplications
                 .Where(l => l.Id == id && l.IsDeleted != true)
-                .Select(l => new { l.EmployeeId, l.Status, l.OrganizationId })
+                .Select(l => new
+                {
+                    l.EmployeeId,
+                    l.Status,
+                    l.OrganizationId,
+                    l.TypeOfLeaveId,
+                    l.NumberOfDays,
+                    l.StartDate
+                })
                 .FirstOrDefaultAsync();
 
             if (leaveApplication == null)
@@ -318,7 +326,78 @@ namespace HRM_BE.Api.Controllers.Official_Form
             request.EmployeeId = leaveApplication.EmployeeId;
             request.OrganizationId = leaveApplication.OrganizationId;
 
-            await _unitOfWork.LeaveApplications.Update(id, request);
+            if (!request.TypeOfLeaveId.HasValue || !request.NumberOfDays.HasValue || !request.StartDate.HasValue)
+            {
+                return ApiResult<bool>.Failure("Thiếu thông tin loại nghỉ/số ngày nghỉ/ngày bắt đầu để cập nhật đơn xin nghỉ.");
+            }
+
+            if (!leaveApplication.TypeOfLeaveId.HasValue || !leaveApplication.NumberOfDays.HasValue || !leaveApplication.StartDate.HasValue)
+            {
+                return ApiResult<bool>.Failure("Đơn xin nghỉ hiện tại thiếu dữ liệu để đối soát số ngày nghỉ còn lại.");
+            }
+
+            var employeeId = leaveApplication.EmployeeId!.Value;
+            var oldTypeOfLeaveId = leaveApplication.TypeOfLeaveId.Value;
+            var oldNumberOfDays = leaveApplication.NumberOfDays.Value;
+            var oldYear = leaveApplication.StartDate.Value.Year;
+
+            var newTypeOfLeaveId = request.TypeOfLeaveId.Value;
+            var newNumberOfDays = request.NumberOfDays.Value;
+            var newYear = request.StartDate.Value.Year;
+
+            await _unitOfWork.TypeOfLeaveEmployee.GetOrCreate(employeeId, oldTypeOfLeaveId, oldYear);
+            await _unitOfWork.TypeOfLeaveEmployee.GetOrCreate(employeeId, newTypeOfLeaveId, newYear);
+
+            // Hoàn lại số ngày đã giữ chỗ của đơn cũ trước khi kiểm tra/quy đổi sang dữ liệu mới.
+            await _unitOfWork.TypeOfLeaveEmployee.UpdateDaysRemaining(
+                -oldNumberOfDays,
+                employeeId,
+                oldTypeOfLeaveId,
+                oldYear);
+
+            var hasEnoughDays = await _unitOfWork.TypeOfLeaveEmployee.CheckDaysRemaining(
+                newNumberOfDays,
+                employeeId,
+                newTypeOfLeaveId,
+                newYear);
+
+            if (!hasEnoughDays)
+            {
+                await _unitOfWork.TypeOfLeaveEmployee.UpdateDaysRemaining(
+                    oldNumberOfDays,
+                    employeeId,
+                    oldTypeOfLeaveId,
+                    oldYear);
+
+                return ApiResult<bool>.Failure("Số ngày nghỉ vượt quá số ngày nghỉ còn lại theo loại nghỉ.");
+            }
+
+            await _unitOfWork.TypeOfLeaveEmployee.UpdateDaysRemaining(
+                newNumberOfDays,
+                employeeId,
+                newTypeOfLeaveId,
+                newYear);
+
+            try
+            {
+                await _unitOfWork.LeaveApplications.Update(id, request);
+            }
+            catch
+            {
+                await _unitOfWork.TypeOfLeaveEmployee.UpdateDaysRemaining(
+                    -newNumberOfDays,
+                    employeeId,
+                    newTypeOfLeaveId,
+                    newYear);
+
+                await _unitOfWork.TypeOfLeaveEmployee.UpdateDaysRemaining(
+                    oldNumberOfDays,
+                    employeeId,
+                    oldTypeOfLeaveId,
+                    oldYear);
+                throw;
+            }
+
             return ApiResult<bool>.Success("Cập nhật đơn xin nghỉ thành công", true);
         }
         /// <summary>
