@@ -34,6 +34,7 @@ namespace HRM_BE.Core.Models.Official_Form.CheckInCheckOut
     {
         public int? OrganizationId { get; set; }
         public int? EmployeeId { get; set; }
+        public bool? ForApproval { get; set; }
         public string? KeyWord { get; set; }
         public DateTime? StartDate { get; set; }
         public DateTime? EndDate { get; set; }

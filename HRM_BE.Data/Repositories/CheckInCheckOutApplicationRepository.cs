@@ -6,7 +6,6 @@ using HRM_BE.Core.Exceptions;
 using HRM_BE.Core.IRepositories;
 using HRM_BE.Core.Models.Common;
 using HRM_BE.Core.Models.Official_Form.CheckInCheckOut;
-using HRM_BE.Data.Migrations;
 using HRM_BE.Data.SeedWorks;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
@@ -30,6 +29,9 @@ namespace HRM_BE.Data.Repositories
         public async Task<PagingResult<CheckInCheckOutApplicationDto>> GetPaging(
             int? organizationId,
             int? employeeId,
+            int currentEmployeeId,
+            bool isAdmin,
+            bool forApproval,
             string? keyWord,
             DateTime? startDate,
             DateTime? endDate,
@@ -45,6 +47,15 @@ namespace HRM_BE.Data.Repositories
                 .Include(x => x.Approver)
                 .Include(x => x.ShiftCatalog)
                 .AsQueryable();
+
+            if (forApproval)
+            {
+                query = query.Where(x => x.ApproverId == currentEmployeeId);
+            }
+            else if (!isAdmin)
+            {
+                query = query.Where(x => x.EmployeeId == currentEmployeeId);
+            }
 
             if (employeeId.HasValue)
                 query = query.Where(x => x.EmployeeId == employeeId);
@@ -108,7 +119,13 @@ namespace HRM_BE.Data.Repositories
                 .Include(x => x.ShiftCatalog)
                 .AsQueryable();
 
-            return await _mapper.ProjectTo<CheckInCheckOutApplicationDto>(query).FirstOrDefaultAsync();
+            var data = await _mapper.ProjectTo<CheckInCheckOutApplicationDto>(query).FirstOrDefaultAsync();
+            if (data == null)
+            {
+                throw new EntityNotFoundException(nameof(CheckInCheckOutApplication), $"Id = {id}");
+            }
+
+            return data;
         }
 
         public async Task<int> CreateAsync(CreateCheckInCheckOutApplicationRequest request)
@@ -167,6 +184,9 @@ namespace HRM_BE.Data.Repositories
         public async Task<List<CheckInCheckOutApplicationDto>> GetExportData(
             int? organizationId,
             int? employeeId,
+            int currentEmployeeId,
+            bool isAdmin,
+            bool forApproval,
             string? keyWord,
             DateTime? startDate,
             DateTime? endDate,
@@ -178,6 +198,15 @@ namespace HRM_BE.Data.Repositories
                 .Include(x => x.Approver)
                 .Include(x => x.ShiftCatalog)
                 .AsQueryable();
+
+            if (forApproval)
+            {
+                query = query.Where(x => x.ApproverId == currentEmployeeId);
+            }
+            else if (!isAdmin)
+            {
+                query = query.Where(x => x.EmployeeId == currentEmployeeId);
+            }
 
             if (employeeId.HasValue)
                 query = query.Where(x => x.EmployeeId == employeeId);

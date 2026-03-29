@@ -10,6 +10,9 @@ namespace HRM_BE.Core.IRepositories
         Task<PagingResult<CheckInCheckOutApplicationDto>> GetPaging(
             int? organizationId,
             int? employeeId,
+            int currentEmployeeId,
+            bool isAdmin,
+            bool forApproval,
             string? keyWord,
             DateTime? startDate,
             DateTime? endDate,
@@ -26,6 +29,9 @@ namespace HRM_BE.Core.IRepositories
         Task<List<CheckInCheckOutApplicationDto>> GetExportData(
             int? organizationId,
             int? employeeId,
+            int currentEmployeeId,
+            bool isAdmin,
+            bool forApproval,
             string? keyWord,
             DateTime? startDate,
             DateTime? endDate,

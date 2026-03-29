@@ -1,29 +1,82 @@
 using ClosedXML.Excel;
+using HRM_BE.Api.Extension;
+using HRM_BE.Core.Constants;
+using HRM_BE.Core.Constants.Identity;
+using HRM_BE.Core.Data.Payroll_Timekeeping.TimekeepingRegulation;
 using HRM_BE.Core.ISeedWorks;
 using HRM_BE.Core.Models.Common;
 using HRM_BE.Core.Models.Official_Form.CheckInCheckOut;
+using HRM_BE.Data;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+
+#pragma warning disable CS1591
 
 namespace HRM_BE.Api.Controllers.Official_Form
 {
     [Route("api/checkin-checkout-application")]
     [ApiController]
+    [Authorize]
     public class CheckInCheckOutApplicationController : ControllerBase
     {
         private readonly IUnitOfWork _unitOfWork;
+        private readonly HrmContext _dbContext;
 
-        public CheckInCheckOutApplicationController(IUnitOfWork unitOfWork)
+        public CheckInCheckOutApplicationController(IUnitOfWork unitOfWork, HrmContext dbContext)
         {
             _unitOfWork = unitOfWork;
+            _dbContext = dbContext;
+        }
+
+        private int GetCurrentEmployeeId()
+        {
+            var identity = User.Identity as System.Security.Claims.ClaimsIdentity;
+            if (identity == null)
+            {
+                return 0;
+            }
+
+            var claimValue = identity.GetSpecificClaim(ClaimTypeConstant.EmployeeId);
+            return int.TryParse(claimValue, out var employeeId) ? employeeId : 0;
+        }
+
+        private bool IsCurrentUserAdmin()
+        {
+            return User.Claims.Any(c => c.Type == ClaimTypeConstant.Permission && c.Value == PermissionConstant.Admin);
         }
 
         [HttpGet("paging")]
         public async Task<ApiResult<PagingResult<CheckInCheckOutApplicationDto>>> GetPaging(
             [FromQuery] GetCheckInCheckOutApplicationRequest request)
         {
+            var currentEmployeeId = GetCurrentEmployeeId();
+            if (currentEmployeeId <= 0)
+            {
+                return ApiResult<PagingResult<CheckInCheckOutApplicationDto>>.Failure("Không xác định được nhân viên đăng nhập.");
+            }
+
+            var isAdmin = IsCurrentUserAdmin();
+            var forApproval = request.ForApproval == true;
+
+            if (!isAdmin)
+            {
+                if (forApproval)
+                {
+                    request.EmployeeId = null;
+                }
+                else
+                {
+                    request.EmployeeId = currentEmployeeId;
+                }
+            }
+
             var result = await _unitOfWork.CheckInCheckOutApplications.GetPaging(
                 request.OrganizationId,
                 request.EmployeeId,
+                currentEmployeeId,
+                isAdmin,
+                forApproval,
                 request.KeyWord,
                 request.StartDate,
                 request.EndDate,
@@ -43,6 +96,23 @@ namespace HRM_BE.Api.Controllers.Official_Form
         public async Task<ApiResult<CheckInCheckOutApplicationDto>> GetById(
             [FromQuery] EntityIdentityRequest<int> request)
         {
+            var currentEmployeeId = GetCurrentEmployeeId();
+            if (currentEmployeeId <= 0)
+            {
+                return ApiResult<CheckInCheckOutApplicationDto>.Failure("Không xác định được nhân viên đăng nhập.");
+            }
+
+            var isAdmin = IsCurrentUserAdmin();
+            var canView = await _dbContext.CheckInCheckOutApplications.AnyAsync(x =>
+                x.Id == request.Id &&
+                x.IsDeleted != true &&
+                (isAdmin || x.EmployeeId == currentEmployeeId || x.ApproverId == currentEmployeeId));
+
+            if (!canView)
+            {
+                return ApiResult<CheckInCheckOutApplicationDto>.Failure("Bạn không có quyền xem đơn checkin/checkout này.");
+            }
+
             var result = await _unitOfWork.CheckInCheckOutApplications.GetById(request.Id);
             return new ApiResult<CheckInCheckOutApplicationDto>(
                 "Đơn checkin/checkout đã được lấy thành công!",
@@ -54,6 +124,20 @@ namespace HRM_BE.Api.Controllers.Official_Form
         public async Task<ApiResult<CheckInCheckOutApplicationDto>> Create(
             [FromBody] CreateCheckInCheckOutApplicationRequest request)
         {
+            var currentEmployeeId = GetCurrentEmployeeId();
+            if (currentEmployeeId <= 0)
+            {
+                return ApiResult<CheckInCheckOutApplicationDto>.Failure("Không xác định được nhân viên đăng nhập.");
+            }
+
+            var approverExists = await _dbContext.Employees.AnyAsync(e => e.Id == request.ApproverId && e.IsDeleted != true);
+            if (!approverExists)
+            {
+                return ApiResult<CheckInCheckOutApplicationDto>.Failure("Người duyệt không tồn tại.");
+            }
+
+            request.EmployeeId = currentEmployeeId;
+
             var id = await _unitOfWork.CheckInCheckOutApplications.CreateAsync(request);
             var result = await _unitOfWork.CheckInCheckOutApplications.GetById(id);
             return ApiResult<CheckInCheckOutApplicationDto>.Success(
@@ -67,6 +151,32 @@ namespace HRM_BE.Api.Controllers.Official_Form
             int id,
             [FromBody] UpdateCheckInCheckOutApplicationRequest request)
         {
+            var currentEmployeeId = GetCurrentEmployeeId();
+            if (currentEmployeeId <= 0)
+            {
+                return ApiResult<bool>.Failure("Không xác định được nhân viên đăng nhập.");
+            }
+
+            var application = await _dbContext.CheckInCheckOutApplications
+                .Where(x => x.Id == id && x.IsDeleted != true)
+                .Select(x => new { x.EmployeeId, x.CheckInCheckOutStatus })
+                .FirstOrDefaultAsync();
+
+            if (application == null)
+            {
+                return ApiResult<bool>.Failure("Không tìm thấy đơn checkin/checkout.");
+            }
+
+            if (application.EmployeeId != currentEmployeeId)
+            {
+                return ApiResult<bool>.Failure("Bạn không có quyền cập nhật đơn checkin/checkout này.");
+            }
+
+            if (application.CheckInCheckOutStatus != 0)
+            {
+                return ApiResult<bool>.Failure("Chỉ có thể cập nhật đơn ở trạng thái chờ duyệt.");
+            }
+
             await _unitOfWork.CheckInCheckOutApplications.UpdateAsync(id, request);
             return ApiResult<bool>.Success("Cập nhật đơn checkin/checkout thành công", true);
         }
@@ -74,16 +184,65 @@ namespace HRM_BE.Api.Controllers.Official_Form
         [HttpPut("update-status")]
         public async Task<ApiResult<bool>> UpdateStatus(int id, [FromBody] int status)
         {
+            var currentEmployeeId = GetCurrentEmployeeId();
+            if (currentEmployeeId <= 0)
+            {
+                return ApiResult<bool>.Failure("Không xác định được nhân viên đăng nhập.");
+            }
+
+            if (status != 1 && status != 2)
+            {
+                return ApiResult<bool>.Failure("Trạng thái duyệt không hợp lệ.");
+            }
+
+            var application = await _dbContext.CheckInCheckOutApplications
+                .Where(x => x.Id == id && x.IsDeleted != true)
+                .FirstOrDefaultAsync();
+
+            if (application == null)
+            {
+                return ApiResult<bool>.Failure("Không tìm thấy đơn checkin/checkout.");
+            }
+
+            // Only the designated approver can approve/reject (including admin if they are the designated approver)
+            if (application.ApproverId != currentEmployeeId)
+            {
+                return ApiResult<bool>.Failure("Chỉ người duyệt được chỉ định mới có quyền duyệt/từ chối đơn này.");
+            }
+
+            if (application.CheckInCheckOutStatus != 0)
+            {
+                return ApiResult<bool>.Failure("Đơn này đã được xử lý trước đó.");
+            }
+
             await _unitOfWork.CheckInCheckOutApplications.UpdateStatusAsync(id, status);
+
+            if (status == 1)
+            {
+                await ApplyApprovedCheckInCheckOutToTimesheetAsync(application);
+            }
+
             return ApiResult<bool>.Success("Cập nhật trạng thái đơn checkin/checkout thành công", true);
         }
 
         [HttpGet("export-excel")]
         public async Task<IActionResult> ExportExcel([FromQuery] GetCheckInCheckOutApplicationRequest request)
         {
+            var currentEmployeeId = GetCurrentEmployeeId();
+            if (currentEmployeeId <= 0)
+            {
+                return Ok(ApiResult<bool>.Failure("Không xác định được nhân viên đăng nhập."));
+            }
+
+            var isAdmin = IsCurrentUserAdmin();
+            var forApproval = request.ForApproval == true;
+
             var data = await _unitOfWork.CheckInCheckOutApplications.GetExportData(
                 request.OrganizationId,
                 request.EmployeeId,
+                currentEmployeeId,
+                isAdmin,
+                forApproval,
                 request.KeyWord,
                 request.StartDate,
                 request.EndDate,
@@ -121,15 +280,15 @@ namespace HRM_BE.Api.Controllers.Official_Form
                 };
 
                 worksheet.Cell(rowIndex, 1).Value = i + 1;
-                worksheet.Cell(rowIndex, 2).Value = row.Employee?.EmployeeCode ?? "";
-                worksheet.Cell(rowIndex, 3).Value = $"{row.Employee?.LastName} {row.Employee?.FirstName}".Trim();
+                worksheet.Cell(rowIndex, 2).Value = row.Employee.EmployeeCode;
+                worksheet.Cell(rowIndex, 3).Value = $"{row.Employee.LastName} {row.Employee.FirstName}".Trim();
                 worksheet.Cell(rowIndex, 4).Value = row.Date.ToString("dd/MM/yyyy");
                 worksheet.Cell(rowIndex, 5).Value = row.TimeCheckIn.HasValue ? row.TimeCheckIn.Value.ToString(@"hh\:mm") : "";
                 worksheet.Cell(rowIndex, 6).Value = row.TimeCheckOut.HasValue ? row.TimeCheckOut.Value.ToString(@"hh\:mm") : "";
-                worksheet.Cell(rowIndex, 7).Value = row.Reason ?? "";
+                worksheet.Cell(rowIndex, 7).Value = row.Reason;
                 worksheet.Cell(rowIndex, 8).Value = row.Description ?? "";
-                worksheet.Cell(rowIndex, 9).Value = row.ShiftCatalog?.Name ?? "";
-                worksheet.Cell(rowIndex, 10).Value = $"{row.Approver?.LastName} {row.Approver?.FirstName}".Trim();
+                worksheet.Cell(rowIndex, 9).Value = row.ShiftCatalog.Name;
+                worksheet.Cell(rowIndex, 10).Value = $"{row.Approver.LastName} {row.Approver.FirstName}".Trim();
                 worksheet.Cell(rowIndex, 11).Value = statusText;
             }
 
@@ -144,6 +303,93 @@ namespace HRM_BE.Api.Controllers.Official_Form
                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 fileName);
         }
+
+        private async Task ApplyApprovedCheckInCheckOutToTimesheetAsync(HRM_BE.Core.Data.Official_Form.CheckInCheckOutApplication application)
+        {
+            var employee = await _dbContext.Employees
+                .Where(e => e.Id == application.EmployeeId && e.IsDeleted != true)
+                .Select(e => new { e.Id, e.OrganizationId })
+                .FirstOrDefaultAsync();
+
+            if (employee == null)
+            {
+                return;
+            }
+
+            var shiftWork = await _dbContext.ShiftWorks
+                .Where(sw =>
+                    sw.IsDeleted != true &&
+                    sw.OrganizationId == employee.OrganizationId &&
+                    sw.ShiftCatalogId == application.ShiftCatalogId &&
+                    sw.StartDate.HasValue && sw.EndDate.HasValue &&
+                    sw.StartDate.Value.Date <= application.Date.Date &&
+                    sw.EndDate.Value.Date >= application.Date.Date)
+                .OrderByDescending(sw => sw.StartDate)
+                .FirstOrDefaultAsync();
+
+            var existing = await _dbContext.Timesheets
+                .FirstOrDefaultAsync(t =>
+                    t.EmployeeId == application.EmployeeId &&
+                    t.Date.HasValue &&
+                    t.Date.Value.Date == application.Date.Date);
+
+            var hasCheckIn = application.CheckType == 0 || application.CheckType == 2;
+            var hasCheckOut = application.CheckType == 1 || application.CheckType == 2;
+
+            if (existing == null)
+            {
+                var created = new Timesheet
+                {
+                    EmployeeId = application.EmployeeId,
+                    Date = application.Date.Date,
+                    ShiftWorkId = shiftWork?.Id,
+                    StartTime = hasCheckIn ? application.TimeCheckIn : null,
+                    EndTime = hasCheckOut ? application.TimeCheckOut : null,
+                    LateDuration = 0,
+                    EarlyLeaveDuration = 0,
+                    TimeKeepingLeaveStatus = TimeKeepingLeaveStatus.None
+                };
+
+                if (created.StartTime.HasValue && created.EndTime.HasValue)
+                {
+                    var workingHours = (created.EndTime.Value - created.StartTime.Value).TotalHours;
+                    created.NumberOfWorkingHour = workingHours > 0 ? workingHours : 0;
+                }
+
+                await _dbContext.Timesheets.AddAsync(created);
+            }
+            else
+            {
+                if (hasCheckIn && application.TimeCheckIn.HasValue)
+                {
+                    existing.StartTime = application.TimeCheckIn;
+                }
+
+                if (hasCheckOut && application.TimeCheckOut.HasValue)
+                {
+                    existing.EndTime = application.TimeCheckOut;
+                }
+
+                if (!existing.ShiftWorkId.HasValue && shiftWork != null)
+                {
+                    existing.ShiftWorkId = shiftWork.Id;
+                }
+
+                existing.TimeKeepingLeaveStatus = TimeKeepingLeaveStatus.None;
+                existing.LateDuration = existing.LateDuration ?? 0;
+                existing.EarlyLeaveDuration = existing.EarlyLeaveDuration ?? 0;
+
+                if (existing.StartTime.HasValue && existing.EndTime.HasValue)
+                {
+                    var workingHours = (existing.EndTime.Value - existing.StartTime.Value).TotalHours;
+                    existing.NumberOfWorkingHour = workingHours > 0 ? workingHours : 0;
+                }
+            }
+
+            await _dbContext.SaveChangesAsync();
+        }
     }
 }
+
+#pragma warning restore CS1591
 
