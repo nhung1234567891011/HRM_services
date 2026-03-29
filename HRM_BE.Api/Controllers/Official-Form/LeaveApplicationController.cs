@@ -51,6 +51,32 @@ namespace HRM_BE.Api.Controllers.Official_Form
             return User.Claims.Any(c => c.Type == ClaimTypeConstant.Permission && c.Value == PermissionConstant.Admin);
         }
 
+        private static List<int> NormalizeEmployeeIds(IEnumerable<int>? employeeIds)
+        {
+            return (employeeIds ?? Enumerable.Empty<int>())
+                .Where(id => id > 0)
+                .Distinct()
+                .ToList();
+        }
+
+        private async Task<List<int>> GetInvalidEmployeeIdsAsync(IEnumerable<int> employeeIds, int? organizationId)
+        {
+            var normalizedIds = NormalizeEmployeeIds(employeeIds);
+            if (normalizedIds.Count == 0)
+            {
+                return new List<int>();
+            }
+
+            var validEmployeeIds = await _dbContext.Employees
+                .Where(e => normalizedIds.Contains(e.Id)
+                    && e.IsDeleted != true
+                    && (!organizationId.HasValue || e.OrganizationId == organizationId))
+                .Select(e => e.Id)
+                .ToListAsync();
+
+            return normalizedIds.Except(validEmployeeIds).ToList();
+        }
+
         /// <summary>
         /// HRM - Là Nhân viên,HR tôi muốn xem danh sách đơn xin nghỉ
         /// </summary>
@@ -175,9 +201,39 @@ namespace HRM_BE.Api.Controllers.Official_Form
             request.EmployeeId = employee.Id;
             request.OrganizationId = employee.OrganizationId;
 
+            request.ApproverIds = NormalizeEmployeeIds(request.ApproverIds);
+            request.ReplacementIds = NormalizeEmployeeIds(request.ReplacementIds);
+            request.RelatedPersonIds = NormalizeEmployeeIds(request.RelatedPersonIds);
+
             if (request.ApproverIds.Count == 0)
             {
                 return ApiResult<LeaveApplicationDto>.Failure("Đơn xin nghỉ cần có ít nhất một người duyệt.");
+            }
+
+            if (request.ApproverIds.Contains(employee.Id) || request.ReplacementIds.Contains(employee.Id))
+            {
+                return ApiResult<LeaveApplicationDto>.Failure("Người tạo đơn không thể là người duyệt hoặc người thay thế.");
+            }
+
+            var overlapApproverReplacementIds = request.ApproverIds.Intersect(request.ReplacementIds).ToList();
+            if (overlapApproverReplacementIds.Count > 0)
+            {
+                return ApiResult<LeaveApplicationDto>.Failure("Người duyệt và người thay thế không được trùng nhau.");
+            }
+
+            var invalidEmployeeIds = await GetInvalidEmployeeIdsAsync(
+                request.ApproverIds
+                    .Concat(request.ReplacementIds)
+                    .Concat(request.RelatedPersonIds),
+                null);
+            if (invalidEmployeeIds.Count > 0)
+            {
+                return ApiResult<LeaveApplicationDto>.Failure($"Có nhân viên không hợp lệ trong danh sách người duyệt/thay thế/liên quan: {string.Join(", ", invalidEmployeeIds)}");
+            }
+
+            if (request.UpdateDaysRemainingTypeOfLeaveEmployeeRequest == null)
+            {
+                return ApiResult<LeaveApplicationDto>.Failure("Thiếu thông tin số ngày phép để tạo đơn xin nghỉ.");
             }
 
             request.UpdateDaysRemainingTypeOfLeaveEmployeeRequest.EmployeeId = employee.Id;
@@ -229,6 +285,36 @@ namespace HRM_BE.Api.Controllers.Official_Form
                 return ApiResult<bool>.Failure("Chỉ có thể cập nhật đơn xin nghỉ ở trạng thái chờ xác nhận.");
             }
 
+            request.ApproverIds = NormalizeEmployeeIds(request.ApproverIds);
+            request.ReplacementIds = NormalizeEmployeeIds(request.ReplacementIds);
+            request.RelatedPersonIds = NormalizeEmployeeIds(request.RelatedPersonIds);
+
+            if (request.ApproverIds.Count == 0)
+            {
+                return ApiResult<bool>.Failure("Đơn xin nghỉ cần có ít nhất một người duyệt.");
+            }
+
+            if (request.ApproverIds.Contains(currentEmployeeId) || request.ReplacementIds.Contains(currentEmployeeId))
+            {
+                return ApiResult<bool>.Failure("Người tạo đơn không thể là người duyệt hoặc người thay thế.");
+            }
+
+            var overlapApproverReplacementIds = request.ApproverIds.Intersect(request.ReplacementIds).ToList();
+            if (overlapApproverReplacementIds.Count > 0)
+            {
+                return ApiResult<bool>.Failure("Người duyệt và người thay thế không được trùng nhau.");
+            }
+
+            var invalidEmployeeIds = await GetInvalidEmployeeIdsAsync(
+                request.ApproverIds
+                    .Concat(request.ReplacementIds)
+                    .Concat(request.RelatedPersonIds),
+                null);
+            if (invalidEmployeeIds.Count > 0)
+            {
+                return ApiResult<bool>.Failure($"Có nhân viên không hợp lệ trong danh sách người duyệt/thay thế/liên quan: {string.Join(", ", invalidEmployeeIds)}");
+            }
+
             request.EmployeeId = leaveApplication.EmployeeId;
             request.OrganizationId = leaveApplication.OrganizationId;
 
@@ -263,14 +349,53 @@ namespace HRM_BE.Api.Controllers.Official_Form
                 return ApiResult<bool>.Failure("Chỉ người duyệt hoặc người thay thế mới có thể duyệt đơn xin nghỉ.");
             }
 
+            if (request.Status != LeaveApplicationStatus.Approved && request.Status != LeaveApplicationStatus.Rejected)
+            {
+                return ApiResult<bool>.Failure("Trạng thái duyệt không hợp lệ.");
+            }
+
+            var leaveApplicationSnapshot = await _dbContext.LeaveApplications
+                .Where(l => l.Id == id && l.IsDeleted != true)
+                .Select(l => new
+                {
+                    l.Status,
+                    l.EmployeeId,
+                    l.TypeOfLeaveId,
+                    l.NumberOfDays,
+                    l.StartDate
+                })
+                .FirstOrDefaultAsync();
+
+            if (leaveApplicationSnapshot == null)
+            {
+                return ApiResult<bool>.Failure("Không tìm thấy đơn xin nghỉ.");
+            }
+
+            if (leaveApplicationSnapshot.Status != LeaveApplicationStatus.Pending)
+            {
+                return ApiResult<bool>.Failure("Chỉ có thể duyệt đơn xin nghỉ ở trạng thái chờ duyệt.");
+            }
+
             if (request.Status == LeaveApplicationStatus.Rejected)
             {
-                await _unitOfWork.TypeOfLeaveEmployee.UpdateDaysRemaining(-request.UpdateDaysRemainingTypeOfLeaveEmployeeRequest.DaysRemaining, request.UpdateDaysRemainingTypeOfLeaveEmployeeRequest.EmployeeId, request.UpdateDaysRemainingTypeOfLeaveEmployeeRequest.TypeOfLeaveId, request.UpdateDaysRemainingTypeOfLeaveEmployeeRequest.Year);
+                if (!leaveApplicationSnapshot.EmployeeId.HasValue
+                    || !leaveApplicationSnapshot.TypeOfLeaveId.HasValue
+                    || !leaveApplicationSnapshot.NumberOfDays.HasValue
+                    || !leaveApplicationSnapshot.StartDate.HasValue)
+                {
+                    return ApiResult<bool>.Failure("Đơn xin nghỉ thiếu dữ liệu để hoàn tác số ngày phép.");
+                }
+
+                await _unitOfWork.TypeOfLeaveEmployee.UpdateDaysRemaining(
+                    -leaveApplicationSnapshot.NumberOfDays.Value,
+                    leaveApplicationSnapshot.EmployeeId.Value,
+                    leaveApplicationSnapshot.TypeOfLeaveId.Value,
+                    leaveApplicationSnapshot.StartDate.Value.Year);
             }
             await _unitOfWork.LeaveApplications.UpdateStatus(id, request.Status, request.ApproverNote);
             var leaveApplication = await _unitOfWork.LeaveApplications.GetById(id);
             // xử lý trừ số ngày nghỉ trong bảng LeavePermission
-            if (request.Status.HasFlag(LeaveApplicationStatus.Approved) && leaveApplication.OnPaidLeaveStatus == OnPaidLeaveStatus.Yes)
+            if (request.Status == LeaveApplicationStatus.Approved && leaveApplication.OnPaidLeaveStatus == OnPaidLeaveStatus.Yes)
             {
                 //await _unitOfWork.LeavePermissions.TriggerUpdateNumberLeavePermission(leaveApplication.EmployeeId.Value, leaveApplication.NumberOfDays.Value, leaveApplication.StartDate.Value, leaveApplication.EndDate.Value);
 
@@ -369,7 +494,7 @@ namespace HRM_BE.Api.Controllers.Official_Form
                 }   
                     await _dbContext.SaveChangesAsync();
             }
-            else if (request.Status.HasFlag(LeaveApplicationStatus.Approved) && leaveApplication.OnPaidLeaveStatus == OnPaidLeaveStatus.No)
+            else if (request.Status == LeaveApplicationStatus.Approved && leaveApplication.OnPaidLeaveStatus == OnPaidLeaveStatus.No)
             {
                 var employeeId = leaveApplication.EmployeeId.Value;
                 var startDate = leaveApplication.StartDate.Value;
@@ -437,16 +562,54 @@ namespace HRM_BE.Api.Controllers.Official_Form
         [HttpPut("update-status-multiple")]
         public async Task<ApiResult<bool>> UpdateStatusMultiple([FromBody] UpdateStatusLeaveApplicationMultipleRequest request)
         {
+            if (request.UpdateStatusLeaveApplicationRequests == null || request.UpdateStatusLeaveApplicationRequests.Count == 0)
+            {
+                return ApiResult<bool>.Failure("Danh sách đơn cần duyệt không được để trống.");
+            }
+
             var currentEmployeeId = GetCurrentEmployeeId();
             if (currentEmployeeId <= 0)
             {
                 return ApiResult<bool>.Failure("Không xác định được nhân viên đăng nhập.");
             }
 
+            if (request.UpdateStatusLeaveApplicationRequests.Any(x => x.Status != LeaveApplicationStatus.Approved && x.Status != LeaveApplicationStatus.Rejected))
+            {
+                return ApiResult<bool>.Failure("Có trạng thái duyệt không hợp lệ trong danh sách.");
+            }
+
             var leaveApplicationIds = request.UpdateStatusLeaveApplicationRequests
                 .Select(x => x.Id)
                 .Distinct()
                 .ToList();
+
+            var leaveApplicationSnapshots = await _dbContext.LeaveApplications
+                .Where(l => leaveApplicationIds.Contains(l.Id) && l.IsDeleted != true)
+                .Select(l => new
+                {
+                    l.Id,
+                    l.Status,
+                    l.EmployeeId,
+                    l.TypeOfLeaveId,
+                    l.NumberOfDays,
+                    l.StartDate
+                })
+                .ToListAsync();
+
+            if (leaveApplicationSnapshots.Count != leaveApplicationIds.Count)
+            {
+                return ApiResult<bool>.Failure("Có đơn xin nghỉ không tồn tại hoặc đã bị xóa.");
+            }
+
+            var nonPendingIds = leaveApplicationSnapshots
+                .Where(l => l.Status != LeaveApplicationStatus.Pending)
+                .Select(l => l.Id)
+                .ToList();
+
+            if (nonPendingIds.Count > 0)
+            {
+                return ApiResult<bool>.Failure("Chỉ có thể duyệt các đơn đang ở trạng thái chờ duyệt.");
+            }
 
             var approvableIds = await _dbContext.LeaveApplications
                 .Where(l => leaveApplicationIds.Contains(l.Id)
@@ -464,15 +627,28 @@ namespace HRM_BE.Api.Controllers.Official_Form
                 return ApiResult<bool>.Failure("Chỉ người duyệt hoặc người thay thế mới có thể duyệt đơn xin nghỉ.");
             }
 
+            var leaveApplicationSnapshotById = leaveApplicationSnapshots
+                .ToDictionary(x => x.Id, x => x);
+
             foreach (var item in request.UpdateStatusLeaveApplicationRequests)
             {
-                if (item.Status == LeaveApplicationStatus.Rejected && item.UpdateDaysRemainingTypeOfLeaveEmployeeRequest != null)
+                if (item.Status == LeaveApplicationStatus.Rejected)
                 {
+                    var leaveApplicationSnapshot = leaveApplicationSnapshotById[item.Id];
+
+                    if (!leaveApplicationSnapshot.EmployeeId.HasValue
+                        || !leaveApplicationSnapshot.TypeOfLeaveId.HasValue
+                        || !leaveApplicationSnapshot.NumberOfDays.HasValue
+                        || !leaveApplicationSnapshot.StartDate.HasValue)
+                    {
+                        return ApiResult<bool>.Failure("Đơn xin nghỉ thiếu dữ liệu để hoàn tác số ngày phép.");
+                    }
+
                     await _unitOfWork.TypeOfLeaveEmployee.UpdateDaysRemaining(
-                        -item.UpdateDaysRemainingTypeOfLeaveEmployeeRequest.DaysRemaining,
-                        item.UpdateDaysRemainingTypeOfLeaveEmployeeRequest.EmployeeId,
-                        item.UpdateDaysRemainingTypeOfLeaveEmployeeRequest.TypeOfLeaveId,
-                        item.UpdateDaysRemainingTypeOfLeaveEmployeeRequest.Year);
+                        -leaveApplicationSnapshot.NumberOfDays.Value,
+                        leaveApplicationSnapshot.EmployeeId.Value,
+                        leaveApplicationSnapshot.TypeOfLeaveId.Value,
+                        leaveApplicationSnapshot.StartDate.Value.Year);
                 }
                 await _unitOfWork.LeaveApplications.UpdateStatus(item.Id, item.Status, item.ApproverNote);
             }
