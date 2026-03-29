@@ -55,7 +55,9 @@ namespace HRM_BE.Data.Repositories
             {
                 if (forApproval)
                 {
-                    query = query.Where(l => l.LeaveApplicationApprovers.Any(a => a.ApproverId == currentEmployeeId));
+                    query = query.Where(l =>
+                        l.LeaveApplicationApprovers.Any(a => a.ApproverId == currentEmployeeId)
+                        || l.LeaveApplicationReplacements.Any(r => r.ReplacementId == currentEmployeeId));
                 }
                 else
                 {

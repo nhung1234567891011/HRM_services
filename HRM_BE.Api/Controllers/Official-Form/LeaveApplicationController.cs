@@ -111,7 +111,8 @@ namespace HRM_BE.Api.Controllers.Official_Form
                 l.IsDeleted != true &&
                 (isAdmin ||
                  l.EmployeeId == currentEmployeeId ||
-                 l.LeaveApplicationApprovers.Any(a => a.ApproverId == currentEmployeeId)));
+                 l.LeaveApplicationApprovers.Any(a => a.ApproverId == currentEmployeeId) ||
+                 l.LeaveApplicationReplacements.Any(r => r.ReplacementId == currentEmployeeId)));
 
             if (!canView)
             {
@@ -250,11 +251,16 @@ namespace HRM_BE.Api.Controllers.Official_Form
                 return ApiResult<bool>.Failure("Không xác định được nhân viên đăng nhập.");
             }
 
-            var canApprove = await _dbContext.LeaveApplicationApprovers
-                .AnyAsync(a => a.LeaveApplicationId == id && a.ApproverId == currentEmployeeId);
+            var canApprove = await _dbContext.LeaveApplications
+                .AnyAsync(l => l.Id == id
+                    && l.IsDeleted != true
+                    && (
+                        l.LeaveApplicationApprovers.Any(a => a.ApproverId == currentEmployeeId)
+                        || l.LeaveApplicationReplacements.Any(r => r.ReplacementId == currentEmployeeId)
+                    ));
             if (!canApprove)
             {
-                return ApiResult<bool>.Failure("Chỉ người duyệt mới có thể duyệt đơn xin nghỉ.");
+                return ApiResult<bool>.Failure("Chỉ người duyệt hoặc người thay thế mới có thể duyệt đơn xin nghỉ.");
             }
 
             if (request.Status == LeaveApplicationStatus.Rejected)
@@ -442,17 +448,20 @@ namespace HRM_BE.Api.Controllers.Official_Form
                 .Distinct()
                 .ToList();
 
-            var approvableIds = await _dbContext.LeaveApplicationApprovers
-                .Where(a => a.LeaveApplicationId.HasValue
-                            && leaveApplicationIds.Contains(a.LeaveApplicationId.Value)
-                            && a.ApproverId == currentEmployeeId)
-                .Select(a => a.LeaveApplicationId.Value)
+            var approvableIds = await _dbContext.LeaveApplications
+                .Where(l => leaveApplicationIds.Contains(l.Id)
+                            && l.IsDeleted != true
+                            && (
+                                l.LeaveApplicationApprovers.Any(a => a.ApproverId == currentEmployeeId)
+                                || l.LeaveApplicationReplacements.Any(r => r.ReplacementId == currentEmployeeId)
+                            ))
+                .Select(l => l.Id)
                 .Distinct()
                 .ToListAsync();
 
             if (leaveApplicationIds.Except(approvableIds).Any())
             {
-                return ApiResult<bool>.Failure("Chỉ người duyệt mới có thể duyệt đơn xin nghỉ.");
+                return ApiResult<bool>.Failure("Chỉ người duyệt hoặc người thay thế mới có thể duyệt đơn xin nghỉ.");
             }
 
             foreach (var item in request.UpdateStatusLeaveApplicationRequests)
