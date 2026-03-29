@@ -13,7 +13,7 @@ namespace HRM_BE.Core.IRepositories
 {
     public interface ILeaveApplicationRepository: IRepositoryBase<LeaveApplication, int>
     {
-        Task<PagingResult<LeaveApplicationDto>> GetPaging(int? organizationId, int? employeeId, DateTime? startDate, DateTime? endDate, double? numberOfDays,int? typeOfLeaveId,string? reasonForLeave,string? note, LeaveApplicationStatus? status, string? sortBy, string? orderBy, int pageIndex = 1, int pageSize = 10, int currentEmployeeId = 0, bool isAdmin = false);
+        Task<PagingResult<LeaveApplicationDto>> GetPaging(int? organizationId, int? employeeId, DateTime? startDate, DateTime? endDate, double? numberOfDays,int? typeOfLeaveId,string? reasonForLeave,string? note, LeaveApplicationStatus? status, string? sortBy, string? orderBy, int pageIndex = 1, int pageSize = 10, int currentEmployeeId = 0, bool isAdmin = false, bool forApproval = false);
 
         Task<LeaveApplicationDto> GetById(int id);
 

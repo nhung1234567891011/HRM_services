@@ -22,6 +22,7 @@ namespace HRM_BE.Core.Models.Official_Form.LeaveApplication
         public OnPaidLeaveStatus? OnPaidLeaveStatus { get; set; }  // Có chọn nghỉ trừ số ngày nghỉ không
 
         public LeaveApplicationStatus? Status { get; set; } 
+        public bool? ForApproval { get; set; }
 
     }
 }

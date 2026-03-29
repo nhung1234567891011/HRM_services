@@ -66,6 +66,15 @@ namespace HRM_BE.Api.Controllers.Official_Form
                 return ApiResult<PagingResult<LeaveApplicationDto>>.Failure("Không xác định được nhân viên đăng nhập.");
             }
 
+            var isAdmin = IsCurrentUserAdmin();
+            var forApproval = request.ForApproval == true;
+
+            // Ở màn "Đơn xin nghỉ", luôn khóa theo nhân viên hiện tại để tránh xem chéo dữ liệu bằng query param.
+            if (!isAdmin && !forApproval)
+            {
+                request.EmployeeId = currentEmployeeId;
+            }
+
             var result = await _unitOfWork.LeaveApplications.GetPaging(
                 request.OrganizationId,
                 request.EmployeeId,
@@ -81,7 +90,8 @@ namespace HRM_BE.Api.Controllers.Official_Form
                 request.PageIndex,
                 request.PageSize,
                 currentEmployeeId,
-                IsCurrentUserAdmin());
+                isAdmin,
+                forApproval);
             return new ApiResult<PagingResult<LeaveApplicationDto>>("Danh sách đơn xin nghỉ đã được lấy thành công!", result);
         }
 
@@ -141,9 +151,36 @@ namespace HRM_BE.Api.Controllers.Official_Form
         /// </summary>
         /// <param name="request"></param>
         /// <returns></returns>
+        [Authorize]
         [HttpPost("create")]
         public async Task<ApiResult<LeaveApplicationDto>> Create([FromBody] CreateLeaveApplicationRequest request)
         {
+            var currentEmployeeId = GetCurrentEmployeeId();
+            if (currentEmployeeId <= 0)
+            {
+                return ApiResult<LeaveApplicationDto>.Failure("Không xác định được nhân viên đăng nhập.");
+            }
+
+            var employee = await _dbContext.Employees
+                .Where(e => e.Id == currentEmployeeId)
+                .Select(e => new { e.Id, e.OrganizationId })
+                .FirstOrDefaultAsync();
+
+            if (employee == null)
+            {
+                return ApiResult<LeaveApplicationDto>.Failure("Không tìm thấy thông tin nhân viên đăng nhập.");
+            }
+
+            request.EmployeeId = employee.Id;
+            request.OrganizationId = employee.OrganizationId;
+
+            if (request.ApproverIds.Count == 0)
+            {
+                return ApiResult<LeaveApplicationDto>.Failure("Đơn xin nghỉ cần có ít nhất một người duyệt.");
+            }
+
+            request.UpdateDaysRemainingTypeOfLeaveEmployeeRequest.EmployeeId = employee.Id;
+
             var status = await _unitOfWork.TypeOfLeaveEmployee.CheckDaysRemaining(request.UpdateDaysRemainingTypeOfLeaveEmployeeRequest.DaysRemaining, request.UpdateDaysRemainingTypeOfLeaveEmployeeRequest.EmployeeId, request.UpdateDaysRemainingTypeOfLeaveEmployeeRequest.TypeOfLeaveId, request.UpdateDaysRemainingTypeOfLeaveEmployeeRequest.Year);
             if(status == false)
             {
@@ -161,9 +198,39 @@ namespace HRM_BE.Api.Controllers.Official_Form
             return ApiResult<LeaveApplicationDto>.Success("Tạo đơn xin nghỉ việc thành công", _mapper.Map<LeaveApplicationDto>(result));
         }
 
+        [Authorize]
         [HttpPut("update")]
         public async Task<ApiResult<bool>> Update(int id, [FromBody] UpdateLeaveApplicationRequest request)
         {
+            var currentEmployeeId = GetCurrentEmployeeId();
+            if (currentEmployeeId <= 0)
+            {
+                return ApiResult<bool>.Failure("Không xác định được nhân viên đăng nhập.");
+            }
+
+            var leaveApplication = await _dbContext.LeaveApplications
+                .Where(l => l.Id == id && l.IsDeleted != true)
+                .Select(l => new { l.EmployeeId, l.Status, l.OrganizationId })
+                .FirstOrDefaultAsync();
+
+            if (leaveApplication == null)
+            {
+                return ApiResult<bool>.Failure("Không tìm thấy đơn xin nghỉ.");
+            }
+
+            if (leaveApplication.EmployeeId != currentEmployeeId)
+            {
+                return ApiResult<bool>.Failure("Bạn không có quyền cập nhật đơn xin nghỉ này.");
+            }
+
+            if (leaveApplication.Status != LeaveApplicationStatus.Pending)
+            {
+                return ApiResult<bool>.Failure("Chỉ có thể cập nhật đơn xin nghỉ ở trạng thái chờ xác nhận.");
+            }
+
+            request.EmployeeId = leaveApplication.EmployeeId;
+            request.OrganizationId = leaveApplication.OrganizationId;
+
             await _unitOfWork.LeaveApplications.Update(id, request);
             return ApiResult<bool>.Success("Cập nhật đơn xin nghỉ thành công", true);
         }
@@ -404,9 +471,36 @@ namespace HRM_BE.Api.Controllers.Official_Form
             return ApiResult<bool>.Success("Cập nhật trạng thái các đơn xin nghỉ thành công", true);
         }
 
+        [Authorize]
         [HttpDelete("delete")]
         public async Task<ApiResult<bool>> Delete(int id)
         {
+            var currentEmployeeId = GetCurrentEmployeeId();
+            if (currentEmployeeId <= 0)
+            {
+                return ApiResult<bool>.Failure("Không xác định được nhân viên đăng nhập.");
+            }
+
+            var leaveApplication = await _dbContext.LeaveApplications
+                .Where(l => l.Id == id && l.IsDeleted != true)
+                .Select(l => new { l.EmployeeId, l.Status })
+                .FirstOrDefaultAsync();
+
+            if (leaveApplication == null)
+            {
+                return ApiResult<bool>.Failure("Không tìm thấy đơn xin nghỉ.");
+            }
+
+            if (leaveApplication.EmployeeId != currentEmployeeId)
+            {
+                return ApiResult<bool>.Failure("Bạn không có quyền xóa đơn xin nghỉ này.");
+            }
+
+            if (leaveApplication.Status != LeaveApplicationStatus.Pending)
+            {
+                return ApiResult<bool>.Failure("Chỉ có thể xóa đơn xin nghỉ ở trạng thái chờ xác nhận.");
+            }
+
             await _unitOfWork.LeaveApplications.DeleteSoft(id);
             return ApiResult<bool>.Success("Xóa đơn xin nghỉ thành công", true);
         }
