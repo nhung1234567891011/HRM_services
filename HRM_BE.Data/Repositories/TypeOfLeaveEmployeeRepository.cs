@@ -47,7 +47,9 @@ namespace HRM_BE.Data.Repositories
                 query = query.Where(typeO => typeO.Year == year.Value);
             }
 
-            var typeOfLeaveEmployeeDto = await _mapper.ProjectTo<TypeOfLeaveEmployeeDto>(query).FirstOrDefaultAsync();
+            var typeOfLeaveEmployeeDto = await _mapper
+                .ProjectTo<TypeOfLeaveEmployeeDto>(query.OrderByDescending(typeO => typeO.Id))
+                .FirstOrDefaultAsync();
 
             if (typeOfLeaveEmployeeDto == null && employeeId.HasValue && typeOfLeaveId.HasValue && year.HasValue)
             {
