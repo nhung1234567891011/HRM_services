@@ -40,9 +40,22 @@ namespace HRM_BE.Data.Repositories
             return _mapper.Map<ApplyOrganizationDto>(entity);
         }
 
+        public async Task<ApplyOrganizationDto?> GetFirstByOrganizationId(int organizationId)
+        {
+            var query = _dbContext.ApplyOrganizations
+                .AsNoTracking()
+                .Where(x => x.IsDeleted != true && x.OrganizationId == organizationId)
+                .OrderByDescending(x => x.Id);
+
+            return await _mapper.ProjectTo<ApplyOrganizationDto>(query).FirstOrDefaultAsync();
+        }
+
         public async Task<PagingResult<ApplyOrganizationDto>> Paging(int? timekeepingSettingId, int? organizationId, int? timekeepingLocationId, string? sortBy, string? orderBy, int pageIndex = 1, int pageSize = 10)
         {
-            var query = _dbContext.ApplyOrganizations.Where(x => x.IsDeleted != true).AsQueryable();
+            var query = _dbContext.ApplyOrganizations
+                .AsNoTracking()
+                .Where(x => x.IsDeleted != true)
+                .AsQueryable();
 
             if (organizationId.HasValue)
             {

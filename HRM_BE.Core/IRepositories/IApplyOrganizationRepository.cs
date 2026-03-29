@@ -14,6 +14,7 @@ namespace HRM_BE.Core.IRepositories
     public interface IApplyOrganizationRepository : IRepositoryBase<ApplyOrganization, int>
     {
         Task<PagingResult<ApplyOrganizationDto>> Paging(int? timekeepingSettingId, int? organizationId, int? timekeepingLocationId, string? sortBy, string? orderBy, int pageIndex = 1, int pageSize = 10);
+        Task<ApplyOrganizationDto?> GetFirstByOrganizationId(int organizationId);
         Task<ApplyOrganizationDto> Create(CreateApplyOrganizationRequest request);
         Task Update(int id, UpdateApplyOrganizationRequest request);
         Task<ApplyOrganizationDto> GetById(int id);

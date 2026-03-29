@@ -123,23 +123,47 @@ namespace HRM_BE.Data.Repositories
         //    //}
         //    return result;
         //} 
-        private async Task<List<GetOrganizationDto>> GetAllChildrenAsync(int organizationId) 
+        private async Task<List<GetOrganizationDto>> GetAllChildrenAsync(int organizationId)
         {
+            var organizations = await _dbContext.Organizations
+                .AsNoTracking()
+                .Include(o => o.OrganizationType)
+                .Where(o => o.IsDeleted != true)
+                .ToListAsync();
 
-            var organization = await _dbContext.Organizations.AsNoTracking()
-                .FirstOrDefaultAsync(o => o.Id == organizationId);
-            var organizationDto = _mapper.Map<GetOrganizationDto>(organization);
+            var organizationIds = organizations.Select(o => o.Id).ToList();
 
-            if (organization != null)
+            var employeeCountByOrganization = await _dbContext.Employees
+                .AsNoTracking()
+                .Where(e => e.IsDeleted == false && e.OrganizationId.HasValue && organizationIds.Contains(e.OrganizationId.Value))
+                .GroupBy(e => e.OrganizationId!.Value)
+                .Select(g => new { OrganizationId = g.Key, Count = g.Count() })
+                .ToDictionaryAsync(x => x.OrganizationId, x => x.Count);
+
+            var dtoMap = organizations.ToDictionary(
+                o => o.Id,
+                o =>
+                {
+                    var dto = _mapper.Map<GetOrganizationDto>(o);
+                    dto.OrganizationChildren = new List<GetOrganizationDto>();
+                    dto.TotalEmployees = employeeCountByOrganization.TryGetValue(o.Id, out var count) ? count : 0;
+                    return dto;
+                });
+
+            foreach (var org in organizations)
             {
-                // Gọi đệ quy để lấy các tổ chức con, bắt đầu từ tổ chức gốc
-                await GetAllChildrenRecursiveAsync(organization.Id, organizationDto);
+                if (org.OrganizatioParentId.HasValue && dtoMap.TryGetValue(org.OrganizatioParentId.Value, out var parentDto))
+                {
+                    parentDto.OrganizationChildren.Add(dtoMap[org.Id]);
+                }
             }
-            var result = _mapper.Map<List<GetOrganizationDto>>(organizationDto.OrganizationChildren);
 
+            if (!dtoMap.TryGetValue(organizationId, out var root))
+            {
+                return new List<GetOrganizationDto>();
+            }
 
-
-            return result;
+            return root.OrganizationChildren;
         }
 
 
@@ -296,7 +320,7 @@ namespace HRM_BE.Data.Repositories
             //.FirstOrDefaultAsync();
             var organization = await _dbContext.Organizations.AsNoTracking()
                .Include(o => o.OrganizationType)
-                .Where(o => o.Id == organizationId)
+                .Where(o => o.Id == organizationId && o.IsDeleted != true)
                 .OrderByDescending(o => o.Rank)
                .FirstOrDefaultAsync();
 
