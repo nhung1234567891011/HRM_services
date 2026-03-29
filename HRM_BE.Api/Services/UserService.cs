@@ -64,17 +64,19 @@ namespace HRM_BE.Api.Services
             {
                 var email = httpContext.User.Claims.First(x => x.Type == "Email").Value;
 
-                var user = await _dbContext.Users.FirstOrDefaultAsync(x => x.Email == email);
+                var user = await _dbContext.Users
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(x => x.Email == email);
 
                 if (user == null)
                 {
                     throw new ApiException("Không tìm thấy người dùng hợp lệ!", HttpStatusCodeConstant.BadRequest);
                 }
 
-                var permissions = await GetPermissionByUserAsync(user);
+                var permissions = await GetPermissionByUserIdAsync(user.Id);
 
                 //var roles= await GetRoleAsync(user);
-                var roles = await GetRoleNormalizedAsync(user);
+                var roles = await GetRoleNormalizedAsync(user.Id);
 
                 var employee = await GetEmployeeByUser(user.EmployeeId);
 
@@ -113,17 +115,19 @@ namespace HRM_BE.Api.Services
             {
                 var email = _httpContextAccessor.HttpContext.User.Claims.First(x => x.Type == "Email").Value;
 
-                var user = await _dbContext.Users.FirstOrDefaultAsync(x => x.Email == email);
+                var user = await _dbContext.Users
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(x => x.Email == email);
 
                 if (user == null)
                 {
                     throw new ApiException("Không tìm thấy người dùng hợp lệ!", HttpStatusCodeConstant.BadRequest);
                 }
 
-                var permissions = await GetPermissionByUserAsync(user);
+                var permissions = await GetPermissionByUserIdAsync(user.Id);
 
                 //var roles = await GetRoleAsync(user);
-                var roles = await GetRoleNormalizedAsync(user);
+                var roles = await GetRoleNormalizedAsync(user.Id);
 
 
                 var employee = await GetEmployeeByUser(user.EmployeeId);
@@ -387,38 +391,46 @@ namespace HRM_BE.Api.Services
         }
 
 
-        private async Task<List<string>> GetRoleNormalizedAsync(User user)
+        private async Task<List<string>> GetRoleNormalizedAsync(int userId)
         {
-            var userRoles = await _dbContext.UserRoles
-                .Where(ur => ur.UserId == user.Id)
-                .Select(ur => ur.RoleId)
+            return await _dbContext.UserRoles
+                .AsNoTracking()
+                .Where(ur => ur.UserId == userId)
+                .Join(
+                    _dbContext.Roles.AsNoTracking(),
+                    ur => ur.RoleId,
+                    r => r.Id,
+                    (_, r) => r.NormalizedName)
+                .Where(x => !string.IsNullOrEmpty(x))
+                .Distinct()
                 .ToListAsync();
-
-            var normalizedRoles = new List<string>();
-
-            foreach (var roleId in userRoles)
-            {
-                var role = await _roleManager.FindByIdAsync(roleId.ToString());
-                if (role != null)
-                {
-                    normalizedRoles.Add(role.NormalizedName);
-                }
-            }
-
-            return normalizedRoles;
         }
 
 
 
         public async Task<List<string>> GetPermissionByUserAsync(User user)
         {
-            var roles = await _userManager.GetRolesAsync(user);
+            return await GetPermissionByUserIdAsync(user.Id);
+        }
 
-            var permissions = await _dbContext.Roles.Where(role => roles.Contains(role.Name))
-            .SelectMany(role => role.RolePermissions)
-            .Select(rolePermission => rolePermission.Permission.Name).ToListAsync();
-
-            return permissions;
+        private async Task<List<string>> GetPermissionByUserIdAsync(int userId)
+        {
+            return await _dbContext.UserRoles
+                .AsNoTracking()
+                .Where(ur => ur.UserId == userId)
+                .Join(
+                    _dbContext.RolePermissions.AsNoTracking(),
+                    ur => ur.RoleId,
+                    rp => rp.RoleId,
+                    (_, rp) => rp.PermissionId)
+                .Join(
+                    _dbContext.Permissions.AsNoTracking(),
+                    permissionId => permissionId,
+                    p => p.Id,
+                    (_, p) => p.Name)
+                .Where(x => !string.IsNullOrEmpty(x))
+                .Distinct()
+                .ToListAsync();
         }
 
         private async Task<List<string>> GetUserWithRolePermission(User user)
@@ -474,7 +486,7 @@ namespace HRM_BE.Api.Services
             }
             else
             {
-                var employee = await _dbContext.Employees.Where(x => x.Id == employeeId).Include(x=>x.StaffPosition).FirstOrDefaultAsync();
+                var employee = await _dbContext.Employees.AsNoTracking().Where(x => x.Id == employeeId).Include(x=>x.StaffPosition).FirstOrDefaultAsync();
                 if (employee == null)
                 {
                     return null;
@@ -490,7 +502,7 @@ namespace HRM_BE.Api.Services
             }
             else
             {
-                var company = await _dbContext.Companies.Where(x=>x.Id == companyId).FirstOrDefaultAsync();
+                var company = await _dbContext.Companies.AsNoTracking().Where(x=>x.Id == companyId).FirstOrDefaultAsync();
                 if (company == null) {
                     return null;
                 }
@@ -506,7 +518,7 @@ namespace HRM_BE.Api.Services
             }
             else
             {
-                var organization = await _dbContext.Organizations.Where(x => x.Id == organizationId).FirstOrDefaultAsync();
+                var organization = await _dbContext.Organizations.AsNoTracking().Where(x => x.Id == organizationId).FirstOrDefaultAsync();
                 if (organization == null)
                 {
                     return null;

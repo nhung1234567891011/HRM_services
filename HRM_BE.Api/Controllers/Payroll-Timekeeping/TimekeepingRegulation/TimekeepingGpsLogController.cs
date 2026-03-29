@@ -54,17 +54,7 @@ namespace HRM_BE.Api.Controllers.Payroll_Timekeeping.TimekeepingRegulation
 
             // Lấy cấu hình áp dụng chấm công của tổ chức (ApplyOrganization)
             // Để front-end biết có yêu cầu vị trí GPS khi chấm công hay không
-            var applyOrgPaging = await _unitOfWork.ApplyOrganization.Paging(
-                null,              // timekeepingSettingId
-                organizationId,    // organizationId
-                null,              // timekeepingLocationId
-                null,              // sortBy
-                null,              // orderBy
-                1,                 // pageIndex
-                1                  // pageSize
-            );
-
-            var applyOrg = applyOrgPaging.Items.FirstOrDefault();
+            var applyOrg = await _unitOfWork.ApplyOrganization.GetFirstByOrganizationId(organizationId);
 
             // Trả về thông tin checkin của nhân viên cho front-end
             var checkinStatus = new CheckInStatus
@@ -168,17 +158,7 @@ namespace HRM_BE.Api.Controllers.Payroll_Timekeeping.TimekeepingRegulation
 
             // Lấy cấu hình áp dụng chấm công của tổ chức (ApplyOrganization)
             // Để biết tổ chức này có yêu cầu vị trí GPS khi chấm công hay không
-            var applyOrgPaging = await _unitOfWork.ApplyOrganization.Paging(
-                null,              // timekeepingSettingId
-                organizationId,    // organizationId
-                null,              // timekeepingLocationId
-                null,              // sortBy
-                null,              // orderBy
-                1,                 // pageIndex
-                1                  // pageSize
-            );
-
-            var applyOrg = applyOrgPaging.Items.FirstOrDefault();
+            var applyOrg = await _unitOfWork.ApplyOrganization.GetFirstByOrganizationId(organizationId);
 
             // Mặc định: nếu không có cấu hình thì vẫn kiểm tra theo địa điểm (giữ nguyên hành vi cũ)
             var requiresLocation = true;

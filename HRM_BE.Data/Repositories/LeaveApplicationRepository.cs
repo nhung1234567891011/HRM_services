@@ -49,7 +49,10 @@ namespace HRM_BE.Data.Repositories
         bool isAdmin = false,
         bool forApproval = false)
         {
-            var query = _dbContext.LeaveApplications.Where(l => l.IsDeleted != true).AsQueryable();
+            var query = _dbContext.LeaveApplications
+                .AsNoTracking()
+                .Where(l => l.IsDeleted != true)
+                .AsQueryable();
 
             if (!isAdmin)
             {

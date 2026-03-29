@@ -151,8 +151,6 @@ namespace HRM_BE.Data.Repositories
                         query = query.Where(c =>
                             ((c.LastName ?? "").Trim() + " " + (c.FirstName ?? "").Trim()).Contains(term) ||
                             ((c.FirstName ?? "").Trim() + " " + (c.LastName ?? "").Trim()).Contains(term) ||
-                            (!string.IsNullOrEmpty(c.PhoneNumber) && c.PhoneNumber.Contains(keyWord)) ||
-                            (!string.IsNullOrEmpty(c.WorkPhoneNumber) && c.WorkPhoneNumber.Contains(keyWord)) ||
                             (c.StaffPosition != null && !string.IsNullOrEmpty(c.StaffPosition.PositionName) && c.StaffPosition.PositionName.Contains(term)) ||
                             (c.StaffTitle != null && !string.IsNullOrEmpty(c.StaffTitle.StaffTitleName) && c.StaffTitle.StaffTitleName.Contains(term)));
                     }
@@ -308,8 +306,16 @@ namespace HRM_BE.Data.Repositories
         //}
         public async Task<List<int>> GetAllChildOrganizationIds(int parentId)
         {
-            // Lấy tất cả các tổ chức
-            var allOrganizations = await _dbContext.Organizations.AsNoTracking().ToListAsync();
+            // Chỉ tải trường cần thiết để giảm I/O khi lọc theo cây tổ chức
+            var allOrganizations = await _dbContext.Organizations
+                .AsNoTracking()
+                .Where(o => o.IsDeleted != true)
+                .Select(o => new Organization
+                {
+                    Id = o.Id,
+                    OrganizatioParentId = o.OrganizatioParentId
+                })
+                .ToListAsync();
 
             // Gọi hàm đệ quy để tìm tất cả các Id con
             var result = new List<int>();
