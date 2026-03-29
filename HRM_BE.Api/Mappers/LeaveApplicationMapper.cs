@@ -12,6 +12,15 @@ namespace HRM_BE.Api.Mappers
         {
             CreateMap<LeaveApplication, LeaveApplicationDto>().ReverseMap();
             CreateMap<LeaveApplication, UpdateStatusLeaveApplicationRequest>().ReverseMap();
+            CreateMap<UpdateLeaveApplicationRequest, LeaveApplication>()
+               .ForMember(dest => dest.LeaveApplicationApprovers, opt => opt.Ignore())
+               .ForMember(dest => dest.LeaveApplicationReplacements, opt => opt.Ignore())
+               .ForMember(dest => dest.LeaveApplicationRelatedPeople, opt => opt.Ignore())
+               .ForMember(dest => dest.TypeOfLeave, opt => opt.Ignore())
+               .ForMember(dest => dest.Employee, opt => opt.Ignore())
+               .ForMember(dest => dest.Organization, opt => opt.Ignore())
+               .ForMember(dest => dest.LeavePermission, opt => opt.Ignore());
+
             CreateMap<CreateLeaveApplicationRequest, LeaveApplication>()
            .ForMember(dest => dest.LeaveApplicationApprovers, opt => opt.MapFrom(src =>
                (src.ApproverIds ?? new List<int>())

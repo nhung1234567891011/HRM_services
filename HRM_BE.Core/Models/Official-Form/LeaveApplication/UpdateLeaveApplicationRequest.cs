@@ -19,6 +19,7 @@ namespace HRM_BE.Core.Models.Official_Form.LeaveApplication
         public string? ReasonForLeave { get; set; }
         public string? Note { get; set; }
         public string? ApproverNote { get; set; } // Ghi chú của người duyệt cho đơn
+        public OnPaidLeaveStatus? OnPaidLeaveStatus { get; set; } = HRM_BE.Core.Data.Official_Form.OnPaidLeaveStatus.No;
 
         public LeaveApplicationStatus? Status { get; set; } = LeaveApplicationStatus.Pending;
 
