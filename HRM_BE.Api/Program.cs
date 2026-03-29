@@ -64,7 +64,6 @@ builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
 var app = builder.Build();
-app.UseCors("CorsPolicy");
 
 #region ignore
 // Configure the HTTP request pipeline.
@@ -80,18 +79,19 @@ if (app.Environment.IsDevelopment() || app.Environment.IsStaging() || app.Enviro
     app.UseSwagger();
     app.UseSwaggerUI(c =>
     {
-        c.SwaggerEndpoint("/swagger/v1/swagger.json", "HRM SMO - TNY NGUYEN v1");
+        c.SwaggerEndpoint("/swagger/v1/swagger.json", "EUCHOICE API V1");
         c.DisplayOperationId();
         c.DisplayRequestDuration();
     });
 }
 
+app.UseHttpsRedirection();
 
 app.UseStaticFiles();
 
 app.UseRouting();
 
-app.UseHttpsRedirection();
+app.UseCors("CorsPolicy");
 
 app.UseAuthentication();
 
@@ -99,18 +99,11 @@ app.UseAuthorization();
 
 app.UseHangfireDashboard();
 app.MapControllers();
+app.MapHub<RefreshTokenHub>("/hubs/refresh-token-hub");
+app.MapHub<RemindWorkHub>("/hubs/remind-work-notification-hub");
 
 
 //app.MigrateDatabase();
-
-#pragma warning disable ASP0014 
-app.UseEndpoints(endpoints =>
-{
-    endpoints.MapControllers();
-    endpoints.MapHub<RefreshTokenHub>("/hubs/refresh-token-hub");
-    endpoints.MapHub<RemindWorkHub>("/hubs/remind-work-notification-hub");
-});
-#pragma warning restore ASP0014 
 
 app.Run();
 // cấu hình path 

@@ -48,7 +48,17 @@ namespace HRM_BE.Data.Repositories
         public async Task Delete(int id)
         {
             var entity = await GetSummaryTimeSheetAndCheckExist(id);
-            entity.IsDeleted = false;
+
+            var isTransferredToPayroll = await _dbContext.PayrollSummaryTimesheets
+                .AnyAsync(pst => pst.SummaryTimesheetNameId == id
+                                 && pst.Payroll.IsDeleted != true);
+
+            if (isTransferredToPayroll)
+            {
+                throw new ApiException("Bảng chấm công tổng hợp đã chuyển tính lương, không thể xóa.");
+            }
+
+            entity.IsDeleted = true;
             await UpdateAsync(entity);
         }
 
@@ -358,8 +368,20 @@ namespace HRM_BE.Data.Repositories
 
             var data = await _mapper.ProjectTo<SummaryTimeSheetDto>(query).ToListAsync();
 
+            var summaryTimesheetIds = data.Select(d => d.Id).ToList();
+            var transferredSummaryTimesheetIds = await _dbContext.PayrollSummaryTimesheets
+                .Where(pst => pst.SummaryTimesheetNameId.HasValue
+                              && summaryTimesheetIds.Contains(pst.SummaryTimesheetNameId.Value)
+                              && pst.Payroll.IsDeleted != true)
+                .Select(pst => pst.SummaryTimesheetNameId.Value)
+                .Distinct()
+                .ToListAsync();
+            var transferredSummaryTimesheetIdSet = transferredSummaryTimesheetIds.ToHashSet();
+
             foreach (var item in data)
             {
+                item.IsTransferredToPayroll = transferredSummaryTimesheetIdSet.Contains(item.Id);
+
                 var statusList = await _dbContext.SummaryTimesheetNameEmployeeConfirms
                     .Where(s => s.SummaryTimesheetNameId == item.Id)
                     .Select(s => s.Status ?? SummaryTimesheetNameEmployeeConfirmStatus.None)

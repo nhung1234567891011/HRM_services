@@ -14,6 +14,7 @@ namespace HRM_BE.Core.Models.SumaryTimeSheet
         public int Id { get; set; }
         public int? OrganizationId { get; set; } // Tên đơn vị, ví dụ: "CÔNG TY CÔNG NGHỆ VÀ TRUYỀN THÔNG..."
         public string? TimekeepingSheetName { get; set; } // Tên bảng chấm công, ví dụ: "Bảng chấm công tháng 10".
+        public bool IsTransferredToPayroll { get; set; } // Đã được chuyển sang tính lương hay chưa.
 
         public TimekeepingMethod? TimekeepingMethod { get; set; } // Hình thức chấm công, ví dụ: "Theo giờ".
 
