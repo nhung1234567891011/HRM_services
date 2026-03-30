@@ -86,5 +86,15 @@ namespace HRM_BE.Api.Controllers.Payroll_Timekeeping.TimekeepingRegulation
             var result = await _unitOfWork.Timesheet.GetTimesheetDurationLateOrEarly(request.StartDate, request.EndDate, request.EmployeeId);
             return ApiResult<TimesheetDurationLateOrEarlyDto>.Success("Lấy số ngày đi sớm về muộn thành công", result);
         }
+
+        /// <summary>
+        /// Tính lại số giờ làm việc cho tất cả bản ghi chấm công (Admin only)
+        /// </summary>
+        [HttpPost("recalculate-all")]
+        public async Task<IActionResult> RecalculateAll([FromQuery] DateTime? startDate = null, [FromQuery] DateTime? endDate = null)
+        {
+            var updatedCount = await _unitOfWork.Timesheet.RecalculateAllTimesheets(startDate, endDate);
+            return Ok(ApiResult<string>.Success("Đã tính lại số giờ làm việc thành công", $"Đã cập nhật {updatedCount} bản ghi"));
+        }
     }
 }

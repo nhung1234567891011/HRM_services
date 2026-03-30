@@ -4,6 +4,7 @@ using HRM_BE.Core.Constants;
 using HRM_BE.Core.Constants.Identity;
 using HRM_BE.Core.Data.Payroll_Timekeeping.TimekeepingRegulation;
 using HRM_BE.Core.ISeedWorks;
+using HRM_BE.Core.IServices;
 using HRM_BE.Core.Models.Common;
 using HRM_BE.Core.Models.Official_Form.CheckInCheckOut;
 using HRM_BE.Data;
@@ -22,11 +23,13 @@ namespace HRM_BE.Api.Controllers.Official_Form
     {
         private readonly IUnitOfWork _unitOfWork;
         private readonly HrmContext _dbContext;
+        private readonly ITimesheetCalculationService _calculationService;
 
-        public CheckInCheckOutApplicationController(IUnitOfWork unitOfWork, HrmContext dbContext)
+        public CheckInCheckOutApplicationController(IUnitOfWork unitOfWork, HrmContext dbContext, ITimesheetCalculationService calculationService)
         {
             _unitOfWork = unitOfWork;
             _dbContext = dbContext;
+            _calculationService = calculationService;
         }
 
         private int GetCurrentEmployeeId()
@@ -317,6 +320,7 @@ namespace HRM_BE.Api.Controllers.Official_Form
             }
 
             var shiftWork = await _dbContext.ShiftWorks
+                .Include(sw => sw.ShiftCatalog)
                 .Where(sw =>
                     sw.IsDeleted != true &&
                     sw.OrganizationId == employee.OrganizationId &&
@@ -327,6 +331,8 @@ namespace HRM_BE.Api.Controllers.Official_Form
                 .OrderByDescending(sw => sw.StartDate)
                 .FirstOrDefaultAsync();
 
+            var shiftCatalog = shiftWork?.ShiftCatalog;
+
             var existing = await _dbContext.Timesheets
                 .FirstOrDefaultAsync(t =>
                     t.EmployeeId == application.EmployeeId &&
@@ -336,6 +342,58 @@ namespace HRM_BE.Api.Controllers.Official_Form
             var hasCheckIn = application.CheckType == 0 || application.CheckType == 2;
             var hasCheckOut = application.CheckType == 1 || application.CheckType == 2;
 
+            // Áp dụng logic mới: chấm vào sớm ghi từ giờ bắt đầu ca, chấm ra muộn ghi giờ kết thúc ca
+            TimeSpan? adjustedStartTime = null;
+            TimeSpan? adjustedEndTime = null;
+            double lateDuration = 0;
+            double earlyLeaveDuration = 0;
+
+            if (hasCheckIn && application.TimeCheckIn.HasValue)
+            {
+                var checkInTime = application.TimeCheckIn.Value;
+                if (shiftCatalog?.StartTime != null)
+                {
+                    if (checkInTime < shiftCatalog.StartTime.Value)
+                    {
+                        // Chấm vào sớm: ghi từ giờ bắt đầu ca
+                        adjustedStartTime = shiftCatalog.StartTime.Value;
+                    }
+                    else
+                    {
+                        // Chấm vào muộn hoặc đúng giờ: ghi giờ chấm thực tế
+                        adjustedStartTime = checkInTime;
+                        lateDuration = (checkInTime - shiftCatalog.StartTime.Value).TotalMinutes;
+                    }
+                }
+                else
+                {
+                    adjustedStartTime = checkInTime;
+                }
+            }
+
+            if (hasCheckOut && application.TimeCheckOut.HasValue)
+            {
+                var checkOutTime = application.TimeCheckOut.Value;
+                if (shiftCatalog?.EndTime != null)
+                {
+                    if (checkOutTime < shiftCatalog.EndTime.Value)
+                    {
+                        // Chấm ra sớm: ghi giờ chấm thực tế
+                        adjustedEndTime = checkOutTime;
+                        earlyLeaveDuration = (shiftCatalog.EndTime.Value - checkOutTime).TotalMinutes;
+                    }
+                    else
+                    {
+                        // Chấm ra muộn hoặc đúng giờ: ghi giờ kết thúc ca
+                        adjustedEndTime = shiftCatalog.EndTime.Value;
+                    }
+                }
+                else
+                {
+                    adjustedEndTime = checkOutTime;
+                }
+            }
+
             if (existing == null)
             {
                 var created = new Timesheet
@@ -343,31 +401,30 @@ namespace HRM_BE.Api.Controllers.Official_Form
                     EmployeeId = application.EmployeeId,
                     Date = application.Date.Date,
                     ShiftWorkId = shiftWork?.Id,
-                    StartTime = hasCheckIn ? application.TimeCheckIn : null,
-                    EndTime = hasCheckOut ? application.TimeCheckOut : null,
-                    LateDuration = 0,
-                    EarlyLeaveDuration = 0,
-                    TimeKeepingLeaveStatus = TimeKeepingLeaveStatus.None
+                    StartTime = adjustedStartTime,
+                    EndTime = adjustedEndTime,
+                    LateDuration = lateDuration,
+                    EarlyLeaveDuration = earlyLeaveDuration,
+                    TimeKeepingLeaveStatus = TimeKeepingLeaveStatus.None,
+                    TimekeepingType = TimekeepingType.GPS
                 };
 
-                if (created.StartTime.HasValue && created.EndTime.HasValue)
-                {
-                    var workingHours = (created.EndTime.Value - created.StartTime.Value).TotalHours;
-                    created.NumberOfWorkingHour = workingHours > 0 ? workingHours : 0;
-                }
+                created.NumberOfWorkingHour = await _calculationService.CalculateWorkingHours(created);
 
                 await _dbContext.Timesheets.AddAsync(created);
             }
             else
             {
-                if (hasCheckIn && application.TimeCheckIn.HasValue)
+                if (hasCheckIn && adjustedStartTime.HasValue)
                 {
-                    existing.StartTime = application.TimeCheckIn;
+                    existing.StartTime = adjustedStartTime;
+                    existing.LateDuration = lateDuration;
                 }
 
-                if (hasCheckOut && application.TimeCheckOut.HasValue)
+                if (hasCheckOut && adjustedEndTime.HasValue)
                 {
-                    existing.EndTime = application.TimeCheckOut;
+                    existing.EndTime = adjustedEndTime;
+                    existing.EarlyLeaveDuration = earlyLeaveDuration;
                 }
 
                 if (!existing.ShiftWorkId.HasValue && shiftWork != null)
@@ -376,14 +433,9 @@ namespace HRM_BE.Api.Controllers.Official_Form
                 }
 
                 existing.TimeKeepingLeaveStatus = TimeKeepingLeaveStatus.None;
-                existing.LateDuration = existing.LateDuration ?? 0;
-                existing.EarlyLeaveDuration = existing.EarlyLeaveDuration ?? 0;
+                existing.TimekeepingType ??= TimekeepingType.GPS;
 
-                if (existing.StartTime.HasValue && existing.EndTime.HasValue)
-                {
-                    var workingHours = (existing.EndTime.Value - existing.StartTime.Value).TotalHours;
-                    existing.NumberOfWorkingHour = workingHours > 0 ? workingHours : 0;
-                }
+                existing.NumberOfWorkingHour = await _calculationService.CalculateWorkingHours(existing);
             }
 
             await _dbContext.SaveChangesAsync();

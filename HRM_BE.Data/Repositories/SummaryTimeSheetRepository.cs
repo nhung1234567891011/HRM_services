@@ -75,14 +75,21 @@ namespace HRM_BE.Data.Repositories
                 minStartDate = d.SummaryTimesheetNameDetailTimesheetNames.Min(s => s.DetailTimesheetName.StartDate),
                 maxEndDate = d.SummaryTimesheetNameDetailTimesheetNames.Max(s => s.DetailTimesheetName.EndDate)
             }).FirstOrDefaultAsync();
-            if (periodTime is null)
+            if (periodTime is null || !periodTime.minStartDate.HasValue || !periodTime.maxEndDate.HasValue)
             {
                 throw new EntityNotFoundException($"Bảng chấm công tổng hợp Id = {summaryTimeSheetId} chưa bao gồm bảng chấm công chi tiết nào");
             }
+
+            var periodStartDate = periodTime.minStartDate.Value.Date;
+            var periodEndDate = periodTime.maxEndDate.Value.Date;
             
             var organizationDescendantIds = await GetAllChildOrganizationIds(organizationId);
             organizationDescendantIds.Add(organizationId);
-            var query = _dbContext.Employees.Where( e => organizationDescendantIds.Contains(e.OrganizationId.Value) && e.AccountStatus == AccountStatus.Active).AsNoTracking();
+            var query = _dbContext.Employees
+                .Where(e => e.OrganizationId.HasValue
+                            && organizationDescendantIds.Contains(e.OrganizationId.Value)
+                            && e.AccountStatus == AccountStatus.Active)
+                .AsNoTracking();
             //query = query.Where(e => e.Timesheets.Any(t => t.Date >= periodTime.minStartDate && t.Date <= periodTime.maxEndDate));
             if (!string.IsNullOrEmpty(keyWord))
             {
@@ -96,7 +103,12 @@ namespace HRM_BE.Data.Repositories
             }
             query = query.Where(e => e.Contracts.Count(c => c.ExpiredStatus == false) == 1);
 
-            //var totalWorkingDay = await query..CountAsync
+            // Áp dụng sắp xếp
+            query = query.ApplySorting(sortBy, orderBy);
+            // Tính tổng số bản ghi
+            int total = await query.CountAsync();
+            // Áp dụng phân trang
+            query = query.ApplyPaging(pageIndex, pageSize);
 
             var data = await query.Select(e => new GetSummaryTimeSheetWithEmployeeDto
             {
@@ -108,18 +120,19 @@ namespace HRM_BE.Data.Repositories
                 TotalHour = e.Timesheets
                     .Where(t => t.IsDeleted != true
                                 && t.Date.HasValue
-                                && t.Date.Value.Date >= periodTime.minStartDate.Value.Date
-                                && t.Date.Value.Date <= periodTime.maxEndDate.Value.Date)
+                                && t.Date.Value.Date >= periodStartDate
+                                && t.Date.Value.Date <= periodEndDate)
                     .Sum(t => t.NumberOfWorkingHour ?? 0),
                 TotalWorkingDay = e.Timesheets
                     .Where(t => t.IsDeleted != true
                                 && t.Date.HasValue
-                                && t.Date.Value.Date >= periodTime.minStartDate.Value.Date
-                                && t.Date.Value.Date <= periodTime.maxEndDate.Value.Date
+                                && t.Date.Value.Date >= periodStartDate
+                                && t.Date.Value.Date <= periodEndDate
                                 && t.TimeKeepingLeaveStatus == TimeKeepingLeaveStatus.None
+                                && t.EndTime.HasValue
                                 && (
                                        (t.NumberOfWorkingHour ?? 0) > 0
-                                       // Trường hợp quên chấm ra: vẫn coi là có đi làm nếu có check-in (StartTime) trong ngày
+                                       // Trường hợp giờ làm chưa tính nhưng đã có đủ check-in/check-out trong ngày
                                        || (t.NumberOfWorkingHour == null && t.StartTime.HasValue)
                                    ))
                     .Select(t => t.Date!.Value.Date)
@@ -128,8 +141,8 @@ namespace HRM_BE.Data.Repositories
                 TotalLeaveDay = e.Timesheets
                     .Where(t => t.IsDeleted != true
                                 && t.Date.HasValue
-                                && t.Date.Value.Date >= periodTime.minStartDate.Value.Date
-                                && t.Date.Value.Date <= periodTime.maxEndDate.Value.Date
+                                && t.Date.Value.Date >= periodStartDate
+                                && t.Date.Value.Date <= periodEndDate
                                 && t.TimeKeepingLeaveStatus != TimeKeepingLeaveStatus.None)
                     .Select(t => t.Date!.Value.Date)
                     .Distinct()
@@ -137,8 +150,8 @@ namespace HRM_BE.Data.Repositories
                 TotalOtHour = e.Timesheets
                     .Where(t => t.IsDeleted != true
                                 && t.Date.HasValue
-                                && t.Date.Value.Date >= periodTime.minStartDate.Value.Date
-                                && t.Date.Value.Date <= periodTime.maxEndDate.Value.Date
+                                && t.Date.Value.Date >= periodStartDate
+                                && t.Date.Value.Date <= periodEndDate
                                 && t.ShiftWork.ShiftCatalog.AllowOvertime == true
                                 && t.NumberOfWorkingHour.HasValue
                                 && t.ShiftWork.ShiftCatalog.WorkingHours.HasValue
@@ -147,8 +160,9 @@ namespace HRM_BE.Data.Repositories
                 DatePerMonth = e.Timesheets
                     .Where(t => t.IsDeleted != true
                                 && t.Date.HasValue
-                                && t.Date.Value.Date >= periodTime.minStartDate.Value.Date
-                                && t.Date.Value.Date <= periodTime.maxEndDate.Value.Date
+                                && t.Date.Value.Date >= periodStartDate
+                                && t.Date.Value.Date <= periodEndDate
+                                && t.EndTime.HasValue
                                 && t.NumberOfWorkingHour.HasValue
                                 )
                     .Select(s => s.Date!.Value.Day)
@@ -176,18 +190,10 @@ namespace HRM_BE.Data.Repositories
                     Id = e.Organization.Id,
                     OrganizationName = e.Organization.OrganizationName
                 },
-                StartDate = periodTime.minStartDate.Value.Date,
-                EndDate = periodTime.maxEndDate.Value.Date
+                StartDate = periodStartDate,
+                EndDate = periodEndDate
 
             }).ToListAsync();
-            // Áp dụng sắp xếp
-            query = query.ApplySorting(sortBy, orderBy);
-            // Tính tổng số bản ghi
-            int total = await query.CountAsync();
-            // Áp dụng phân trang
-            query = query.ApplyPaging(pageIndex, pageSize);
-
-            //var employees = await _mapper.ProjectTo<GetSummaryTimeSheetWithEmployeeDto>(query).ToListAsync();
 
             var result = new PagingResult<GetSummaryTimeSheetWithEmployeeDto>(data, pageIndex, pageSize, sortBy, orderBy, total);
 
@@ -205,16 +211,21 @@ namespace HRM_BE.Data.Repositories
                 })
                 .FirstOrDefaultAsync();
 
-            if (periodTime is null)
+            if (periodTime is null || !periodTime.minStartDate.HasValue || !periodTime.maxEndDate.HasValue)
             {
                 throw new EntityNotFoundException($"Bảng chấm công tổng hợp Id = {summaryTimeSheetId} chưa bao gồm bảng chấm công chi tiết nào");
             }
+
+            var periodStartDate = periodTime.minStartDate.Value.Date;
+            var periodEndDate = periodTime.maxEndDate.Value.Date;
 
             var organizationDescendantIds = await GetAllChildOrganizationIds(organizationId);
             organizationDescendantIds.Add(organizationId);
 
             var query = _dbContext.Employees
-                .Where(e => organizationDescendantIds.Contains(e.OrganizationId.Value) && e.AccountStatus == AccountStatus.Active)
+                .Where(e => e.OrganizationId.HasValue
+                            && organizationDescendantIds.Contains(e.OrganizationId.Value)
+                            && e.AccountStatus == AccountStatus.Active)
                 .AsNoTracking();
 
             if (!string.IsNullOrEmpty(keyWord))
@@ -243,17 +254,19 @@ namespace HRM_BE.Data.Repositories
                 TotalHour = e.Timesheets
                     .Where(t => t.IsDeleted != true
                                 && t.Date.HasValue
-                                && t.Date.Value.Date >= periodTime.minStartDate.Value.Date
-                                && t.Date.Value.Date <= periodTime.maxEndDate.Value.Date)
+                                && t.Date.Value.Date >= periodStartDate
+                                && t.Date.Value.Date <= periodEndDate)
                     .Sum(t => t.NumberOfWorkingHour ?? 0),
                 TotalWorkingDay = e.Timesheets
                     .Where(t => t.IsDeleted != true
                                 && t.Date.HasValue
-                                && t.Date.Value.Date >= periodTime.minStartDate.Value.Date
-                                && t.Date.Value.Date <= periodTime.maxEndDate.Value.Date
+                                && t.Date.Value.Date >= periodStartDate
+                                && t.Date.Value.Date <= periodEndDate
                                 && t.TimeKeepingLeaveStatus == TimeKeepingLeaveStatus.None
+                                && t.EndTime.HasValue
                                 && (
                                        (t.NumberOfWorkingHour ?? 0) > 0
+                                       // Trường hợp giờ làm chưa tính nhưng đã có đủ check-in/check-out trong ngày
                                        || (t.NumberOfWorkingHour == null && t.StartTime.HasValue)
                                    ))
                     .Select(t => t.Date!.Value.Date)
@@ -262,8 +275,8 @@ namespace HRM_BE.Data.Repositories
                 TotalLeaveDay = e.Timesheets
                     .Where(t => t.IsDeleted != true
                                 && t.Date.HasValue
-                                && t.Date.Value.Date >= periodTime.minStartDate.Value.Date
-                                && t.Date.Value.Date <= periodTime.maxEndDate.Value.Date
+                                && t.Date.Value.Date >= periodStartDate
+                                && t.Date.Value.Date <= periodEndDate
                                 && t.TimeKeepingLeaveStatus != TimeKeepingLeaveStatus.None)
                     .Select(t => t.Date!.Value.Date)
                     .Distinct()
@@ -271,8 +284,8 @@ namespace HRM_BE.Data.Repositories
                 TotalOtHour = e.Timesheets
                     .Where(t => t.IsDeleted != true
                                 && t.Date.HasValue
-                                && t.Date.Value.Date >= periodTime.minStartDate.Value.Date
-                                && t.Date.Value.Date <= periodTime.maxEndDate.Value.Date
+                                && t.Date.Value.Date >= periodStartDate
+                                && t.Date.Value.Date <= periodEndDate
                                 && t.ShiftWork.ShiftCatalog.AllowOvertime == true
                                 && t.NumberOfWorkingHour.HasValue
                                 && t.ShiftWork.ShiftCatalog.WorkingHours.HasValue
@@ -281,8 +294,9 @@ namespace HRM_BE.Data.Repositories
                 DatePerMonth = e.Timesheets
                     .Where(t => t.IsDeleted != true
                                 && t.Date.HasValue
-                                && t.Date.Value.Date >= periodTime.minStartDate.Value.Date
-                                && t.Date.Value.Date <= periodTime.maxEndDate.Value.Date)
+                                && t.Date.Value.Date >= periodStartDate
+                                && t.Date.Value.Date <= periodEndDate
+                                && t.EndTime.HasValue)
                     .Select(s => s.Date!.Value.Day)
                     .Distinct()
                     .Count(),
@@ -308,8 +322,8 @@ namespace HRM_BE.Data.Repositories
                     Id = e.Organization.Id,
                     OrganizationName = e.Organization.OrganizationName
                 },
-                StartDate = periodTime.minStartDate.Value.Date,
-                EndDate = periodTime.maxEndDate.Value.Date
+                StartDate = periodStartDate,
+                EndDate = periodEndDate
             }).ToListAsync();
 
             return data;
@@ -346,10 +360,43 @@ namespace HRM_BE.Data.Repositories
             {
                 query = query.Where(c => c.TimekeepingSheetName.Contains(name));
             }
-            if (month.HasValue && year.HasValue)
+            if (year.HasValue)
             {
-                query = query.Where(s => s.SummaryTimesheetNameDetailTimesheetNames
-                                    .Any(d => d.DetailTimesheetName.EndDate.Value.Month <= month && d.DetailTimesheetName.StartDate.Value.Month >= month && d.DetailTimesheetName.EndDate.Value.Year <= year && d.DetailTimesheetName.StartDate.Value.Year >= year));
+                var targetYear = year.Value;
+                if (month.HasValue && month.Value >= 1 && month.Value <= 12)
+                {
+                    var targetMonthStart = new DateTime(targetYear, month.Value, 1);
+                    var targetMonthEnd = new DateTime(targetYear, month.Value, DateTime.DaysInMonth(targetYear, month.Value));
+
+                    query = query.Where(s => s.SummaryTimesheetNameDetailTimesheetNames.Any(d =>
+                        d.DetailTimesheetName.StartDate.HasValue &&
+                        d.DetailTimesheetName.EndDate.HasValue &&
+                        d.DetailTimesheetName.StartDate.Value.Date <= targetMonthEnd &&
+                        d.DetailTimesheetName.EndDate.Value.Date >= targetMonthStart));
+                }
+                else
+                {
+                    var yearStart = new DateTime(targetYear, 1, 1);
+                    var yearEnd = new DateTime(targetYear, 12, 31);
+
+                    query = query.Where(s => s.SummaryTimesheetNameDetailTimesheetNames.Any(d =>
+                        d.DetailTimesheetName.StartDate.HasValue &&
+                        d.DetailTimesheetName.EndDate.HasValue &&
+                        d.DetailTimesheetName.StartDate.Value.Date <= yearEnd &&
+                        d.DetailTimesheetName.EndDate.Value.Date >= yearStart));
+                }
+            }
+            else if (month.HasValue && month.Value >= 1 && month.Value <= 12)
+            {
+                var currentYear = DateTime.Now.Year;
+                var targetMonthStart = new DateTime(currentYear, month.Value, 1);
+                var targetMonthEnd = new DateTime(currentYear, month.Value, DateTime.DaysInMonth(currentYear, month.Value));
+
+                query = query.Where(s => s.SummaryTimesheetNameDetailTimesheetNames.Any(d =>
+                    d.DetailTimesheetName.StartDate.HasValue &&
+                    d.DetailTimesheetName.EndDate.HasValue &&
+                    d.DetailTimesheetName.StartDate.Value.Date <= targetMonthEnd &&
+                    d.DetailTimesheetName.EndDate.Value.Date >= targetMonthStart));
             }
             if (organizationId.HasValue)
             {

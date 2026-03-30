@@ -251,18 +251,29 @@ namespace HRM_BE.Api.Controllers.Payroll_Timekeeping.TimekeepingRegulation
                 var shiftStartTime = shiftCatalog.StartTime;
                 var checkInTime = DateTime.Now.TimeOfDay;
 
-                // Nếu nhân viên checkin muộn so với giờ làm việc cố định
-                if (checkInTime > shiftStartTime && shiftStartTime != null)
+                // Logic mới: chấm vào sớm hơn giờ ca thì ghi nhận từ giờ bắt đầu ca
+                if (shiftStartTime != null)
                 {
-                    var lateDuration = checkInTime.Subtract((TimeSpan)shiftStartTime).TotalMinutes;
-                    timesheetTable.LateDuration = lateDuration;
+                    if (checkInTime < shiftStartTime)
+                    {
+                        // Chấm vào sớm: ghi nhận từ giờ bắt đầu ca
+                        timesheetTable.StartTime = shiftStartTime.Value;
+                        timesheetTable.LateDuration = 0;
+                    }
+                    else
+                    {
+                        // Chấm vào muộn hoặc đúng giờ: ghi nhận giờ chấm thực tế
+                        timesheetTable.StartTime = checkInTime;
+                        var lateDuration = checkInTime.Subtract(shiftStartTime.Value).TotalMinutes;
+                        timesheetTable.LateDuration = lateDuration;
+                    }
                 }
                 else
                 {
+                    timesheetTable.StartTime = checkInTime;
                     timesheetTable.LateDuration = 0;
                 }
 
-                timesheetTable.StartTime = DateTime.Now.TimeOfDay;
                 await _unitOfWork.Timesheet.AddOrUpdateTimesheetAsync(timesheetTable);
 
                 return Ok(ApiResult<bool>.Success("Check-in thành công!", true));
@@ -272,21 +283,29 @@ namespace HRM_BE.Api.Controllers.Payroll_Timekeeping.TimekeepingRegulation
                 // Cập nhật thời gian checkout vào bảng Timesheet
                 if (timesheet != null)
                 {
-                    // Cập nhật thời gian checkout
                     var checkOutTime = DateTime.Now.TimeOfDay;
-                    timesheet.EndTime = checkOutTime;
-
-                    // Lấy giờ tan làm việc
                     var shiftEndTime = shiftCatalog.EndTime;
 
-                    // Tính về sớm
-                    if (shiftEndTime != null && checkOutTime < shiftEndTime)
+                    // Logic mới: chấm ra muộn hơn giờ ca thì ghi nhận giờ kết thúc ca
+                    if (shiftEndTime != null)
                     {
-                        var earlyLeaveDuration = shiftEndTime.Value.Subtract(checkOutTime).TotalMinutes;
-                        timesheet.EarlyLeaveDuration = earlyLeaveDuration;
+                        if (checkOutTime < shiftEndTime)
+                        {
+                            // Chấm ra sớm: ghi nhận giờ chấm thực tế
+                            timesheet.EndTime = checkOutTime;
+                            var earlyLeaveDuration = shiftEndTime.Value.Subtract(checkOutTime).TotalMinutes;
+                            timesheet.EarlyLeaveDuration = earlyLeaveDuration;
+                        }
+                        else
+                        {
+                            // Chấm ra muộn hoặc đúng giờ: ghi nhận giờ kết thúc ca
+                            timesheet.EndTime = shiftEndTime.Value;
+                            timesheet.EarlyLeaveDuration = 0;
+                        }
                     }
                     else
                     {
+                        timesheet.EndTime = checkOutTime;
                         timesheet.EarlyLeaveDuration = 0;
                     }
 

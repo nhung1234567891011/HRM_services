@@ -1,6 +1,7 @@
 using HRM_BE.Core.Data.Identity;
 using HRM_BE.Core.IRepositories;
 using HRM_BE.Core.ISeedWorks;
+using HRM_BE.Core.IServices;
 using HRM_BE.Data.Repositories;
 using AutoMapper;
 using Microsoft.AspNetCore.Http;
@@ -21,7 +22,7 @@ namespace HRM_BE.Data.SeedWorks
     {
         private readonly HrmContext _context;
 
-        public UnitOfWork(HrmContext context, IMapper mapper, UserManager<User> userManager,IHttpContextAccessor httpContextAccessor)
+        public UnitOfWork(HrmContext context, IMapper mapper, UserManager<User> userManager, IHttpContextAccessor httpContextAccessor, ITimesheetCalculationService calculationService)
         {
             _context = context;
             Banners = new BannerRepository(context, mapper,httpContextAccessor);
@@ -59,7 +60,7 @@ namespace HRM_BE.Data.SeedWorks
             TimekeepingSetting = new TimekeepingSettingRepository(context, mapper, httpContextAccessor);    
             SummaryTimeSheets = new SummaryTimeSheetRepository(context, mapper,httpContextAccessor);
             TypeOfLeaveEmployee= new TypeOfLeaveEmployeeRepository(context, mapper, httpContextAccessor);
-            Timesheet = new TimesheetRepository(context, mapper, httpContextAccessor);
+            Timesheet = new TimesheetRepository(context, mapper, httpContextAccessor, calculationService);
             SummaryTimesheetNameEmployeeConfirms= new SummaryTimesheetNameEmployeeConfirmRepository(context, mapper, httpContextAccessor);
             PrefixConfigs = new PrefixConfigRepository(context, mapper, httpContextAccessor);
             KpiTables = new KpiTableRepository(context, mapper, httpContextAccessor);

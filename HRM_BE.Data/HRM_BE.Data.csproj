@@ -34,4 +34,8 @@
     <ProjectReference Include="..\HRM_BE.Core\HRM_BE.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Compile Include="Services\TimesheetCalculationService.cs" />
+  </ItemGroup>
+
 </Project>

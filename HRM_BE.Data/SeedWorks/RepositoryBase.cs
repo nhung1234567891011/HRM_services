@@ -1,4 +1,4 @@
-﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
 using System.Linq.Expressions;
 using HRM_BE.Core.ISeedWorks;
 using Microsoft.AspNetCore.Http;
@@ -76,7 +76,7 @@ namespace HRM_BE.Data.SeedWorks
                 }
 
                 PropertyInfo? propertyInfoIsDeleted = entity.GetType().GetProperty("IsDeleted");
-                if (propertyInfoCreateAt != null)
+                if (propertyInfoIsDeleted != null)
                 {
                     entity.IsDeleted = false;
                 }
@@ -171,7 +171,7 @@ namespace HRM_BE.Data.SeedWorks
                         }
 
                         PropertyInfo? propertyInfoIsDeleted = entity.GetType().GetProperty("IsDeleted");
-                        if (propertyInfoCreateAt != null)
+                        if (propertyInfoIsDeleted != null)
                         {
                             entity.IsDeleted = false;
                         }

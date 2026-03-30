@@ -14,8 +14,6 @@ namespace HRM_BE.Core.Models.Payroll_Timekeeping.TimekeepingRegulation
 
         public TimeSpan? EndTime { get; set; } // Giờ ra
 
-        public double? NumberOfWorkingHour { get; set; } // Số giờ làm
-
         public TimeKeepingLeaveStatus TimeKeepingLeaveStatus { get; set; } = TimeKeepingLeaveStatus.None;
 
         public double? LateDuration { get; set; } = 0;

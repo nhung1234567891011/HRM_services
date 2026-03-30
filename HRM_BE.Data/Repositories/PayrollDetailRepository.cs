@@ -262,13 +262,14 @@ namespace HRM_BE.Data.Repositories
                 // 2. Tính toán các thành phần lương
                 var baseSalary = contract?.SalaryAmount ?? 0;
 
-                // Số ngày đi làm thực tế (chỉ các ngày có chấm công đi làm bình thường, dùng cho phụ cấp theo ngày như gửi xe)
+                // Số ngày đi làm thực tế: chỉ tính khi có chấm ra để tránh cộng sai ngày chỉ chấm vào.
                 var workingDayDates = employeeTimesheetsInPeriod
                     .Where(t =>
                         t.TimeKeepingLeaveStatus == TimeKeepingLeaveStatus.None &&
+                        t.EndTime.HasValue &&
                         (
                             (t.NumberOfWorkingHour ?? 0) > 0
-                            // Trường hợp quên chấm ra: vẫn coi là có đi làm nếu có check-in (StartTime) trong ngày
+                            // Trường hợp giờ làm chưa tính nhưng đã có đủ check-in/check-out trong ngày
                             || (t.NumberOfWorkingHour == null && t.StartTime.HasValue)
                         ))
                     .Select(t => t.Date!.Value.Date)
@@ -325,7 +326,12 @@ namespace HRM_BE.Data.Repositories
                         return Math.Min(totalHoursInDay, 8m);
                     });
 
-                var receivedSalary = standardWorkDays > 0 ? (baseSalary / (decimal)standardWorkDays) * (decimal)actualWorkDaysAll : 0;
+                // Lương thực nhận tính theo giờ làm trong giờ hành chính (normalHoursTotal), không tính giờ tăng ca
+                // Thêm ngày nghỉ hưởng lương và ngày lễ vào
+                var dailySalaryForReceivedSalary = standardWorkDays > 0 ? baseSalary / (decimal)standardWorkDays : 0;
+                var hourlySalaryForReceivedSalary = dailySalaryForReceivedSalary / 8m;
+                var receivedSalary = (normalHoursTotal * hourlySalaryForReceivedSalary) + 
+                                     (((decimal)paidLeaveDaysCount + holidayDaysOff) * dailySalaryForReceivedSalary);
                 var kpi = contract?.KpiSalary ?? 0;
                 var kpiPercentage = kpiDetail?.CompletionRate ?? 0;
                 var kpiSalary = (decimal)kpi * ((decimal)kpiPercentage / 100);

@@ -1,4 +1,4 @@
-﻿using HRM_BE.Core.Data.Payroll_Timekeeping.TimekeepingRegulation;
+using HRM_BE.Core.Data.Payroll_Timekeeping.TimekeepingRegulation;
 using HRM_BE.Core.Data.Staff;
 using System;
 using System.Collections.Generic;
@@ -16,8 +16,6 @@ namespace HRM_BE.Core.Models.Payroll_Timekeeping.TimekeepingRegulation
         public TimeSpan? StartTime { get; set; }//Giờ bắt đầu chấm.
 
         public TimeSpan? EndTime { get; set; }//Giờ ra 
-
-        public double? NumberOfWorkingHour { get; set; } // Số giờ làm bằng bằng EndTime - StartTime
 
         public double? LateDuration { get; set; } = 0; // Đi muộn (phút)
 

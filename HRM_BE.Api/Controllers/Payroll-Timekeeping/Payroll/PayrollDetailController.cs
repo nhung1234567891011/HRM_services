@@ -5,6 +5,7 @@ using HRM_BE.Core.Models.Common;
 using HRM_BE.Core.Models.Mail;
 using HRM_BE.Core.Models.Payroll_Timekeeping.Payroll;
 using HRM_BE.Api.Services.Interfaces;
+using Microsoft.Data.SqlClient;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using System.Text;
@@ -127,10 +128,22 @@ namespace HRM_BE.Api.Controllers.Payroll_Timekeeping.Payroll
         }
 
         [HttpPost("fetch-payroll-details")]
-        public async Task<List<PayrollDetailDto>> FetchPayrollDetails(int payrollId)
+        public async Task<IActionResult> FetchPayrollDetails([FromQuery] int payrollId)
         {
-            var result = await _unitOfWork.PayrollDetails.FetchPayrollDetails(payrollId);
-            return result;
+            try
+            {
+                var result = await _unitOfWork.PayrollDetails.FetchPayrollDetails(payrollId);
+                return Ok(result);
+            }
+            catch (SqlException ex) when (ex.Number == 207 && ex.Message.Contains("HolidayWorkAmount"))
+            {
+                return Ok(ApiResult<bool>.Failure(
+                    "CSDL chưa được cập nhật cột HolidayWorkAmount. Vui lòng chạy migration mới nhất trước khi tải chi tiết bảng lương."));
+            }
+            catch (Exception ex)
+            {
+                return Ok(ApiResult<bool>.Failure(ex.Message));
+            }
         }
 
         /// <summary>

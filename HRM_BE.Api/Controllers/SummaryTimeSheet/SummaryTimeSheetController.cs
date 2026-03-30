@@ -164,9 +164,14 @@ namespace HRM_BE.Api.Controllers.SummaryTimeSheet
             {
                 var totalLeaveDay = await _unitOfWork.LeaveApplications.GetTotalLeaveEmployee(item.StartDate, item.EndDate, item.Id);
 
-                var workingHours = _unitOfWork.Timesheet.Find(t => t.EmployeeId == item.Id);
-                var totalWorkingHours = workingHours
-                    .Where(t => t.TimeKeepingLeaveStatus == TimeKeepingLeaveStatus.None)
+                var totalWorkingHours = _unitOfWork.Timesheet
+                    .Find(t => t.EmployeeId == item.Id
+                               && t.IsDeleted != true
+                               && t.Date.HasValue
+                               && t.Date.Value.Date >= item.StartDate.Date
+                               && t.Date.Value.Date <= item.EndDate.Date
+                               && t.TimeKeepingLeaveStatus == TimeKeepingLeaveStatus.None
+                               && t.EndTime.HasValue)
                     .Sum(t => t.NumberOfWorkingHour) ?? 0;
 
                 var totalHoliday = await _unitOfWork.Holiday.GetNumberHoliday(item.StartDate, item.EndDate, organizationId);

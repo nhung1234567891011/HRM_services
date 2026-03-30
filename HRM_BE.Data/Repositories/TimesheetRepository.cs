@@ -1,35 +1,28 @@
 using AutoMapper;
-using HRM_BE.Core.Data.Payroll_Timekeeping.LeaveRegulation;
 using HRM_BE.Core.Data.Payroll_Timekeeping.Shift;
 using HRM_BE.Core.Data.Payroll_Timekeeping.TimekeepingRegulation;
-using HRM_BE.Core.Data.Staff;
 using HRM_BE.Core.Exceptions;
 using HRM_BE.Core.Extension;
 using HRM_BE.Core.IRepositories;
+using HRM_BE.Core.IServices;
 using HRM_BE.Core.Models.Common;
-using HRM_BE.Core.Models.Payroll_Timekeeping.LeaveRegulation;
 using HRM_BE.Core.Models.Payroll_Timekeeping.TimekeepingRegulation;
 using HRM_BE.Core.Models.ShiftCatalog;
-using HRM_BE.Core.Models.ShiftWork;
-using HRM_BE.Data.Migrations;
 using HRM_BE.Data.SeedWorks;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace HRM_BE.Data.Repositories
 {
     public class TimesheetRepository : RepositoryBase<Timesheet, int>, ITimesheetRepository
     {
         private readonly IMapper _mapper;
+        private readonly ITimesheetCalculationService _calculationService;
 
-        public TimesheetRepository(HrmContext context, IMapper mapper, IHttpContextAccessor httpContextAccessor) : base(context, httpContextAccessor)
+        public TimesheetRepository(HrmContext context, IMapper mapper, IHttpContextAccessor httpContextAccessor, ITimesheetCalculationService calculationService) : base(context, httpContextAccessor)
         {
             _mapper = mapper;
+            _calculationService = calculationService;
         }
 
         public async Task<PagingResult<TimesheetDto>> Paging(int? employeeId, DateTime? startDate, DateTime? endDate, string? sortBy, string? orderBy, int pageIndex = 1, int pageSize = 10)
@@ -51,7 +44,7 @@ namespace HRM_BE.Data.Repositories
             }
 
             // Áp dụng sắp xếp
-            query = query.ApplySorting(sortBy, orderBy);
+            query = query.ApplySorting(orderBy ?? "Id", sortBy ?? "asc");
             // Tính tổng số bản ghi
             int total = await query.CountAsync();
             // Áp dụng phân trang
@@ -75,16 +68,16 @@ namespace HRM_BE.Data.Repositories
         {
             var entity = await GetTimesheetAndCheckExist(id);
 
-            var employee = await _dbContext.Employees.FindAsync(entity.EmployeeId);
-            //var shiftWork = await _dbContext.ShiftWorks.Where(s => s.Id == entity.ShiftWorkId).FirstOrDefaultAsync();
+            _mapper.Map(request, entity);
 
-            //var workingHours = shiftWork.ShiftCatalog.WorkingHours.Value;
+            entity.NumberOfWorkingHour = await _calculationService.CalculateWorkingHours(entity);
 
-            if( request.NumberOfWorkingHour > 0)
+            if (entity.NumberOfWorkingHour > 0)
             {
                 entity.TimeKeepingLeaveStatus = TimeKeepingLeaveStatus.None;
             }
-            await UpdateAsync(_mapper.Map(request, entity));
+
+            await UpdateAsync(entity);
         }
 
         private async Task<Timesheet> GetTimesheetAndCheckExist(int timeSheetId)
@@ -102,6 +95,7 @@ namespace HRM_BE.Data.Repositories
 
             if (existingTimesheet == null)
             {
+                timesheet.NumberOfWorkingHour = await _calculationService.CalculateWorkingHours(timesheet);
                 await CreateAsync(timesheet);
             }
             else
@@ -109,10 +103,8 @@ namespace HRM_BE.Data.Repositories
                 existingTimesheet.StartTime = timesheet.StartTime ?? existingTimesheet.StartTime;
                 existingTimesheet.EndTime = timesheet.EndTime ?? existingTimesheet.EndTime;
 
-                if (existingTimesheet.StartTime.HasValue && existingTimesheet.EndTime.HasValue)
-                {
-                    existingTimesheet.NumberOfWorkingHour = (existingTimesheet.EndTime.Value - existingTimesheet.StartTime.Value).TotalHours;
-                }
+                existingTimesheet.NumberOfWorkingHour = await _calculationService.CalculateWorkingHours(existingTimesheet);
+                
                 await UpdateAsync(existingTimesheet);
             }
         }
@@ -155,7 +147,7 @@ namespace HRM_BE.Data.Repositories
         }
 
         // Lấy thông tin ShiftCatalog từ ShiftWorkId
-        public async Task<ShiftCatalogDto> GetShiftCatalogByShiftWorkId(int shiftWorkId)
+        public async Task<ShiftCatalogDto?> GetShiftCatalogByShiftWorkId(int shiftWorkId)
         {
             // Truy vấn thông tin ShiftCatalog thông qua ShiftWorkId
             var shiftWork = await _dbContext.ShiftWorks
@@ -177,7 +169,6 @@ namespace HRM_BE.Data.Repositories
                 .FirstOrDefaultAsync(ts => ts.EmployeeId == employeeId && ts.ShiftWorkId == shiftWorkId && ts.Date.HasValue && ts.Date.Value.Date == date.Date);
         }
 
-        // Tạo mới bản ghi chấm công (thêm ngày không đi làm hoặc ngày chưa có dữ liệu)
         public async Task<int> CreateTimesheet(CreateTimesheetRequest request)
         {
             var entity = new Timesheet
@@ -187,14 +178,62 @@ namespace HRM_BE.Data.Repositories
                 Date = request.Date.Date,
                 StartTime = request.StartTime,
                 EndTime = request.EndTime,
-                NumberOfWorkingHour = request.NumberOfWorkingHour,
                 TimeKeepingLeaveStatus = request.TimeKeepingLeaveStatus,
                 LateDuration = request.LateDuration,
                 EarlyLeaveDuration = request.EarlyLeaveDuration,
             };
 
+            entity.NumberOfWorkingHour = await _calculationService.CalculateWorkingHours(entity);
+
             await CreateAsync(entity);
             return entity.Id;
+        }
+
+        public async Task<int> RecalculateAllTimesheets(DateTime? startDate = null, DateTime? endDate = null)
+        {
+            var query = _dbContext.Timesheets
+                .Include(t => t.ShiftWork)
+                    .ThenInclude(sw => sw.ShiftCatalog)
+                .Where(t => t.IsDeleted != true);
+
+            if (startDate.HasValue)
+            {
+                query = query.Where(t => t.Date >= startDate);
+            }
+
+            if (endDate.HasValue)
+            {
+                query = query.Where(t => t.Date <= endDate);
+            }
+
+            var timesheets = await query.ToListAsync();
+
+            int updatedCount = 0;
+
+            foreach (var timesheet in timesheets)
+            {
+                var oldValue = timesheet.NumberOfWorkingHour;
+                var newValue = await _calculationService.CalculateWorkingHours(timesheet);
+
+                if (Math.Abs((oldValue ?? 0) - newValue) > 0.01)
+                {
+                    timesheet.NumberOfWorkingHour = newValue;
+
+                    if (newValue > 0)
+                    {
+                        timesheet.TimeKeepingLeaveStatus = Core.Data.Payroll_Timekeeping.TimekeepingRegulation.TimeKeepingLeaveStatus.None;
+                    }
+
+                    updatedCount++;
+                }
+            }
+
+            if (updatedCount > 0)
+            {
+                await _dbContext.SaveChangesAsync();
+            }
+
+            return updatedCount;
         }
     }
 }
