@@ -1,5 +1,6 @@
 using HRM_BE.Core.Data.Payroll_Timekeeping.Shift;
 using HRM_BE.Core.Data.Payroll_Timekeeping.TimekeepingRegulation;
+using HRM_BE.Core.Data.Official_Form;
 using HRM_BE.Core.ISeedWorks;
 using HRM_BE.Core.Models.Common;
 using HRM_BE.Core.Models.SumaryTimeSheet;
@@ -146,48 +147,155 @@ namespace HRM_BE.Api.Controllers.SummaryTimeSheet
             };
         }
 
-        private async Task EnrichSummaryTimeSheetWithEmployeeItems(List<GetSummaryTimeSheetWithEmployeeDto>? items, int organizationId)
+        private Task EnrichSummaryTimeSheetWithEmployeeItems(List<GetSummaryTimeSheetWithEmployeeDto>? items, int organizationId)
         {
-            if (items is null || items.Count == 0) return;
+            if (items is null || items.Count == 0) return Task.CompletedTask;
 
-            var shiftCatalog = _unitOfWork.ShiftCatalogs.Find(g => g.OrganizationId == organizationId).FirstOrDefault();
-            if (shiftCatalog is null || shiftCatalog.WorkingHours is null || shiftCatalog.WorkingHours.Value <= 0)
-            {
-                // Không có cấu hình ca làm => không thể tính chuẩn (giữ nguyên mặc định 0)
-                return;
-            }
+            var employeeIds = items.Select(i => i.Id).Distinct().ToList();
+            var minStartDate = items.Min(i => i.StartDate).Date;
+            var maxEndDate = items.Max(i => i.EndDate).Date;
 
-            var shiftWorks = _unitOfWork.ShiftWorks.Find(s => s.ShiftCatalogId == shiftCatalog.Id).ToList();
+            var shiftCatalogHoursById = _unitOfWork.ShiftCatalogs
+                .Find(c => c.OrganizationId == organizationId && c.IsDeleted != true)
+                .Select(c => new { c.Id, c.WorkingHours })
+                .ToList()
+                .ToDictionary(
+                    c => c.Id,
+                    c => c.WorkingHours.HasValue && c.WorkingHours.Value > 0 ? c.WorkingHours.Value : 8d);
+
+            var defaultStandardHours = shiftCatalogHoursById.Any()
+                ? shiftCatalogHoursById.Values.First()
+                : 8d;
+
+            var shiftWorks = _unitOfWork.ShiftWorks
+                .Find(s => s.OrganizationId == organizationId && s.IsDeleted != true)
+                .Select(s => new { s.Id, s.ShiftCatalogId, s.TotalWork })
+                .ToList();
+
+            var shiftStandardHoursByShiftWorkId = shiftWorks.ToDictionary(
+                s => s.Id,
+                s => s.ShiftCatalogId.HasValue && shiftCatalogHoursById.TryGetValue(s.ShiftCatalogId.Value, out var hours)
+                    ? hours
+                    : defaultStandardHours);
+
             var totalWorkingDay = (double)shiftWorks.Sum(s => s.TotalWork ?? 0);
+
+            var timesheets = _unitOfWork.Timesheet
+                .Find(t => t.IsDeleted != true
+                           && t.EmployeeId.HasValue
+                           && employeeIds.Contains(t.EmployeeId.Value)
+                           && t.Date.HasValue
+                           && t.Date.Value.Date >= minStartDate
+                           && t.Date.Value.Date <= maxEndDate)
+                .Select(t => new
+                {
+                    EmployeeId = t.EmployeeId!.Value,
+                    Date = t.Date!.Value,
+                    t.ShiftWorkId,
+                    t.EndTime,
+                    t.StartTime,
+                    t.TimeKeepingLeaveStatus,
+                    NumberOfWorkingHour = t.NumberOfWorkingHour ?? 0d
+                })
+                .ToList();
+
+            var paidLeaveApps = _unitOfWork.LeaveApplications
+                .Find(l => l.IsDeleted != true
+                           && l.EmployeeId.HasValue
+                           && employeeIds.Contains(l.EmployeeId.Value)
+                           && l.Status == LeaveApplicationStatus.Approved
+                           && l.StartDate.HasValue
+                           && l.EndDate.HasValue
+                           && l.StartDate.Value.Date < maxEndDate
+                           && l.EndDate.Value.Date > minStartDate
+                           && (l.SalaryPercentage > 0 || l.OnPaidLeaveStatus == OnPaidLeaveStatus.Yes))
+                .Select(l => new
+                {
+                    EmployeeId = l.EmployeeId!.Value,
+                    StartDate = l.StartDate!.Value,
+                    EndDate = l.EndDate!.Value,
+                    NumberOfDays = l.NumberOfDays ?? 0d
+                })
+                .ToList();
+
+            var holidays = _unitOfWork.Holiday
+                .Find(h => h.OrganizationId == organizationId
+                           && h.IsDeleted != true
+                           && h.FromDate.Date <= maxEndDate
+                           && h.ToDate.Date >= minStartDate)
+                .Select(h => new { h.FromDate, h.ToDate })
+                .ToList();
+
+            var holidayDates = holidays
+                .SelectMany(h => Enumerable.Range(0, (h.ToDate.Date - h.FromDate.Date).Days + 1)
+                    .Select(d => h.FromDate.Date.AddDays(d)))
+                .Distinct()
+                .ToHashSet();
 
             foreach (var item in items)
             {
-                var totalLeaveDay = await _unitOfWork.LeaveApplications.GetTotalLeaveEmployee(item.StartDate, item.EndDate, item.Id);
+                var itemStart = item.StartDate.Date;
+                var itemEnd = item.EndDate.Date;
 
-                var totalWorkingHours = _unitOfWork.Timesheet
-                    .Find(t => t.EmployeeId == item.Id
-                               && t.IsDeleted != true
-                               && t.Date.HasValue
-                               && t.Date.Value.Date >= item.StartDate.Date
-                               && t.Date.Value.Date <= item.EndDate.Date
-                               && t.TimeKeepingLeaveStatus == TimeKeepingLeaveStatus.None
-                               && t.EndTime.HasValue)
-                    .Sum(t => t.NumberOfWorkingHour) ?? 0;
+                var employeeTimesheets = timesheets
+                    .Where(t => t.EmployeeId == item.Id
+                                && t.Date.Date >= itemStart
+                                && t.Date.Date <= itemEnd)
+                    .ToList();
 
-                var totalHoliday = await _unitOfWork.Holiday.GetNumberHoliday(item.StartDate, item.EndDate, organizationId);
-                var totalHourHoliday = totalHoliday * shiftCatalog.WorkingHours.Value; // số giờ nghỉ lễ
+                var workedTimesheets = employeeTimesheets
+                    .Where(t => t.TimeKeepingLeaveStatus == TimeKeepingLeaveStatus.None
+                                && t.EndTime.HasValue)
+                    .ToList();
 
-                var paidLeaveHours = totalLeaveDay * shiftCatalog.WorkingHours.Value;
+                var totalWorkingHours = workedTimesheets.Sum(t => t.NumberOfWorkingHour);
+                var equivalentWorkedDays = workedTimesheets.Sum(t =>
+                {
+                    var standardHours = defaultStandardHours;
+                    if (t.ShiftWorkId.HasValue && shiftStandardHoursByShiftWorkId.TryGetValue(t.ShiftWorkId.Value, out var shiftHours))
+                    {
+                        standardHours = shiftHours;
+                    }
+
+                    if (standardHours <= 0) standardHours = defaultStandardHours;
+                    var workedHours = Math.Max(t.NumberOfWorkingHour, 0d);
+                    return standardHours > 0 ? workedHours / standardHours : 0d;
+                });
+
+                var workedDates = workedTimesheets
+                    .Where(t => t.NumberOfWorkingHour > 0 || t.StartTime.HasValue)
+                    .Select(t => t.Date.Date)
+                    .Distinct()
+                    .ToHashSet();
+
+                var totalLeaveDay = paidLeaveApps
+                    .Where(l => l.EmployeeId == item.Id
+                                && l.StartDate.Date < itemEnd
+                                && l.EndDate.Date > itemStart)
+                    .Sum(l => l.NumberOfDays);
+
+                var totalHoliday = holidayDates
+                    .Where(d => d >= itemStart && d <= itemEnd)
+                    .Count();
+
+                var holidayDaysOff = holidayDates
+                    .Where(d => d >= itemStart
+                             && d <= itemEnd
+                             && !workedDates.Contains(d))
+                    .Count();
+
+                var paidLeaveHours = totalLeaveDay * defaultStandardHours;
+                var totalHourHoliday = holidayDaysOff * defaultStandardHours;
 
                 item.TotalLeaveDay = totalLeaveDay + totalHoliday;
                 item.TotalWorkingDay = totalWorkingDay;
-
                 item.TotalHour = totalWorkingHours + paidLeaveHours + totalHourHoliday;
 
-                item.EqualDay = item.TotalHour > 0
-                    ? (item.TotalHour / shiftCatalog.WorkingHours.Value)
-                    : 0;
+                // Quy đổi công theo từng ca + nghỉ hưởng lương + nghỉ lễ.
+                item.EqualDay = equivalentWorkedDays + totalLeaveDay + holidayDaysOff;
             }
+
+            return Task.CompletedTask;
         }
         /// <summary>
         /// APi dùng để get chấm công tổng hợp cho màn bảng lương

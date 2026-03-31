@@ -174,9 +174,24 @@ namespace HRM_BE.Data.Repositories
             // Nếu không có bảng công nào, fallback về tháng/năm của CreatedAt như cũ.
             DateTime periodStartDate;
             DateTime periodEndDate;
+            List<(DateTime Start, DateTime End)> selectedDateRanges;
 
             if (summaryTimesheetNameIds.Any())
             {
+                selectedDateRanges = _dbContext.SummaryTimesheetNameDetailTimesheetNames
+                    .Where(x => summaryTimesheetNameIds.Contains(x.SummaryTimesheetNameId)
+                             && x.DetailTimesheetName.StartDate.HasValue
+                             && x.DetailTimesheetName.EndDate.HasValue)
+                    .Select(x => new
+                    {
+                        Start = x.DetailTimesheetName.StartDate!.Value.Date,
+                        End = x.DetailTimesheetName.EndDate!.Value.Date
+                    })
+                    .ToList()
+                    .Select(x => (x.Start, x.End))
+                    .Distinct()
+                    .ToList();
+
                 var period = _dbContext.SummaryTimesheetNames
                     .Where(s => summaryTimesheetNameIds.Contains(s.Id))
                     .Select(s => new
@@ -191,13 +206,28 @@ namespace HRM_BE.Data.Repositories
                 var fallback = payroll.CreatedAt ?? DateTime.Now;
                 periodStartDate = (period?.MinStartDate ?? fallback).Date;
                 periodEndDate = (period?.MaxEndDate ?? fallback).Date;
+
+                if (!selectedDateRanges.Any())
+                {
+                    selectedDateRanges = new List<(DateTime Start, DateTime End)>
+                    {
+                        (periodStartDate, periodEndDate)
+                    };
+                }
             }
             else
             {
                 var payrollMonth = payroll.CreatedAt ?? DateTime.Now;
                 periodStartDate = new DateTime(payrollMonth.Year, payrollMonth.Month, 1);
                 periodEndDate = periodStartDate.AddMonths(1).AddDays(-1);
+                selectedDateRanges = new List<(DateTime Start, DateTime End)>
+                {
+                    (periodStartDate, periodEndDate)
+                };
             }
+
+            bool IsDateInSelectedRanges(DateTime date) => selectedDateRanges.Any(r => date >= r.Start && date <= r.End);
+            bool IsOverlapWithSelectedRanges(DateTime start, DateTime end) => selectedDateRanges.Any(r => start < r.End && end > r.Start);
 
             var now = DateTime.Now;
 
@@ -225,6 +255,47 @@ namespace HRM_BE.Data.Repositories
                 .Where(sw => sw.OrganizationId == payroll.OrganizationId)
                 .Sum(sw => sw.TotalWork);
 
+            var holidaysInPeriod = _dbContext.Holidays
+                .Where(h => h.OrganizationId == payroll.OrganizationId
+                         && h.FromDate.Date <= periodEndDate
+                         && h.ToDate.Date >= periodStartDate
+                         && h.IsDeleted != true)
+                .Select(h => new { h.Id, h.FromDate, h.ToDate })
+                .ToList();
+
+            var holidayIds = holidaysInPeriod.Select(h => h.Id).ToList();
+            var workFactorsByHolidayId = _dbContext.WorkFactors
+                .Where(wf => holidayIds.Contains(wf.HolidayId ?? 0) && wf.IsDeleted != true)
+                .GroupBy(wf => wf.HolidayId)
+                .ToDictionary(
+                    g => g.Key ?? 0,
+                    g => g.Max(x => x.Factor ?? 2.0m));
+
+            var holidayFactorByDate = new Dictionary<DateTime, decimal>();
+            foreach (var holiday in holidaysInPeriod)
+            {
+                var factor = workFactorsByHolidayId.TryGetValue(holiday.Id, out var configuredFactor)
+                    ? configuredFactor
+                    : 2.0m;
+
+                var fromDate = holiday.FromDate.Date < periodStartDate ? periodStartDate : holiday.FromDate.Date;
+                var toDate = holiday.ToDate.Date > periodEndDate ? periodEndDate : holiday.ToDate.Date;
+
+                for (var date = fromDate; date <= toDate; date = date.AddDays(1))
+                {
+                    if (holidayFactorByDate.TryGetValue(date, out var existingFactor))
+                    {
+                        holidayFactorByDate[date] = Math.Max(existingFactor, factor);
+                    }
+                    else
+                    {
+                        holidayFactorByDate[date] = factor;
+                    }
+                }
+            }
+
+            var holidayDates = holidayFactorByDate.Keys.ToHashSet();
+
             var payrollDetails = new List<PayrollDetail>();
 
             foreach (var employee in employees)
@@ -245,6 +316,8 @@ namespace HRM_BE.Data.Repositories
                                 && t.Date.HasValue
                                 && t.Date.Value.Date >= periodStartDate
                                 && t.Date.Value.Date <= periodEndDate)
+                    .ToList()
+                    .Where(t => t.Date.HasValue && IsDateInSelectedRanges(t.Date.Value.Date))
                     .ToList();
 
                 var shiftWorkIds = employeeTimesheetsInPeriod
@@ -293,7 +366,7 @@ namespace HRM_BE.Data.Repositories
                 var attendanceDays = workingDayDates.Count;
 
                 // Số ngày nghỉ nhưng vẫn được hưởng lương (đơn nghỉ phép đã duyệt, SalaryPercentage > 0 hoặc OnPaidLeaveStatus = Yes)
-                var paidLeaveQuery = _dbContext.LeaveApplications
+                var paidLeaveDaysCount = _dbContext.LeaveApplications
                     .Where(l =>
                         l.EmployeeId == employee.Id &&
                         l.Status == LeaveApplicationStatus.Approved &&
@@ -302,28 +375,21 @@ namespace HRM_BE.Data.Repositories
                         l.StartDate.Value.Date < periodEndDate &&
                         l.EndDate.Value.Date > periodStartDate &&
                         (l.SalaryPercentage > 0 || l.OnPaidLeaveStatus == OnPaidLeaveStatus.Yes))
-                    .Select(l => l.NumberOfDays ?? 0);
-
-                var paidLeaveDaysCount = await EntityFrameworkQueryableExtensions.SumAsync(paidLeaveQuery);
-
-                // Lấy danh sách ngày lễ trong kỳ lương của tổ chức (dùng cho cả ngày công lễ và phụ trội làm ngày lễ)
-                var holidays = _dbContext.Holidays
-                    .Where(h => h.OrganizationId == payroll.OrganizationId
-                             && h.FromDate.Date <= periodEndDate
-                             && h.ToDate.Date >= periodStartDate
-                             && h.IsDeleted != true)
-                    .ToList();
-
-                var holidayDates = holidays
-                    .SelectMany(h => Enumerable.Range(0, (h.ToDate.Date - h.FromDate.Date).Days + 1)
-                        .Select(d => h.FromDate.Date.AddDays(d)))
-                    .Distinct()
-                    .ToHashSet();
+                    .Select(l => new
+                    {
+                        StartDate = l.StartDate!.Value,
+                        EndDate = l.EndDate!.Value,
+                        NumberOfDays = l.NumberOfDays ?? 0
+                    })
+                    .ToList()
+                    .Where(l => IsOverlapWithSelectedRanges(l.StartDate.Date, l.EndDate.Date))
+                    .Sum(l => l.NumberOfDays);
 
                 // Ngày lễ trong kỳ mà nhân viên KHÔNG đi làm (không có chấm công) → vẫn được tính 1 ngày công (8 tiếng)
                 var holidayDaysOff = holidayDates
                     .Where(d => d >= periodStartDate
                              && d <= periodEndDate
+                             && IsDateInSelectedRanges(d)
                              && !workingDayDates.Contains(d))
                     .Count();
 
@@ -405,7 +471,7 @@ namespace HRM_BE.Data.Repositories
 
                 // ===== Lương phụ trội làm việc ngày nghỉ lễ =====
                 decimal holidayWorkAmount = 0m;
-                if (holidays.Any())
+                if (holidayDates.Any())
                 {
 
                     // Tổng giờ làm ngày lễ (chỉ tính những ngày đi làm bình thường, không phải nghỉ phép)
@@ -418,19 +484,17 @@ namespace HRM_BE.Data.Repositories
 
                     if (holidayTimesheets.Any())
                     {
-                        // Lấy hệ số WorkFactor cho ngày lễ (lấy hệ số cao nhất nếu có nhiều ngày lễ khác nhau)
-                        // Mặc định 2.0 nếu không cấu hình (200% theo Luật Lao động VN)
-                        var holidayIds = holidays.Select(h => h.Id).ToList();
-                        var workFactors = _dbContext.WorkFactors
-                            .Where(wf => holidayIds.Contains(wf.HolidayId ?? 0) && wf.IsDeleted != true)
-                            .Select(wf => wf.Factor)
-                            .ToList();
-                        var holidayFactor = workFactors.Any() ? workFactors.Max() ?? 2.0m : 2.0m;
-
-                        // Phụ trội = giờ làm ngày lễ × lương giờ theo ca × (hệ số - 1)
-                        // Phần lương ngày thường (×1) đã được tính trong ReceivedSalary, chỉ tính phần chênh lệch
+                        // Phụ trội = giờ làm ngày lễ × lương giờ theo ca × (hệ số của ngày đó - 1)
+                        // Phần lương ngày thường (×1) đã được tính trong ReceivedSalary, chỉ tính phần chênh lệch.
                         holidayWorkAmount = holidayTimesheets.Sum(t =>
                         {
+                            if (!t.Date.HasValue) return 0m;
+
+                            var holidayDate = t.Date.Value.Date;
+                            var holidayFactor = holidayFactorByDate.TryGetValue(holidayDate, out var factor)
+                                ? factor
+                                : 2.0m;
+
                             var standardHours = GetTimesheetStandardHours(t, shiftStandardHoursById);
                             if (standardHours <= 0m) return 0m;
 
@@ -834,13 +898,14 @@ namespace HRM_BE.Data.Repositories
                 var allowanceMealTravel = payrollDetail.AllowanceMealTravel ?? 0m;
                 var parkingAmount = payrollDetail.ParkingAmount ?? 0m;
                 var overtimeAmount = payrollDetail.OvertimeAmount ?? 0m;
+                var holidayWorkAmount = payrollDetail.HolidayWorkAmount ?? 0m;
                 var commissionAmount = payrollDetail.CommissionAmount ?? 0m;
                 var totalInsuranceDeduction = payrollDetail.BhxhAmount ?? 0m;
                 var unionFeeAmount = payrollDetail.UnionFeeAmount ?? 0m;
 
-                // Công thức: Lương cứng + Phụ cấp + Gửi xe + Hoa hồng + OT - (BHXH+BHTN+BHYT) - Quỹ công đoàn
+                // Công thức: Lương cứng + Phụ cấp + Gửi xe + Hoa hồng + OT + Phụ trội ngày lễ - (BHXH+BHTN+BHYT) - Quỹ công đoàn
                 var coreSalary = (receivedSalary + kpiSalary + bonus) * (salaryRate / 100);
-                payrollDetail.TotalSalary = coreSalary + allowanceMealTravel + parkingAmount + overtimeAmount + commissionAmount;
+                payrollDetail.TotalSalary = coreSalary + allowanceMealTravel + parkingAmount + overtimeAmount + holidayWorkAmount + commissionAmount;
 
                 var totalDeductions = 0m;
                 if (payrollDetail.EmployeeId.HasValue)
