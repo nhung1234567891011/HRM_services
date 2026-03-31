@@ -71,6 +71,7 @@ namespace HRM_BE.Data.Repositories
             _mapper.Map(request, entity);
 
             entity.NumberOfWorkingHour = await _calculationService.CalculateWorkingHours(entity);
+            entity.OvertimeHour = await _calculationService.CalculateOvertimeHours(entity);
 
             if (entity.NumberOfWorkingHour > 0)
             {
@@ -96,6 +97,7 @@ namespace HRM_BE.Data.Repositories
             if (existingTimesheet == null)
             {
                 timesheet.NumberOfWorkingHour = await _calculationService.CalculateWorkingHours(timesheet);
+                timesheet.OvertimeHour = await _calculationService.CalculateOvertimeHours(timesheet);
                 await CreateAsync(timesheet);
             }
             else
@@ -104,6 +106,7 @@ namespace HRM_BE.Data.Repositories
                 existingTimesheet.EndTime = timesheet.EndTime ?? existingTimesheet.EndTime;
 
                 existingTimesheet.NumberOfWorkingHour = await _calculationService.CalculateWorkingHours(existingTimesheet);
+                existingTimesheet.OvertimeHour = await _calculationService.CalculateOvertimeHours(existingTimesheet);
                 
                 await UpdateAsync(existingTimesheet);
             }
@@ -184,6 +187,7 @@ namespace HRM_BE.Data.Repositories
             };
 
             entity.NumberOfWorkingHour = await _calculationService.CalculateWorkingHours(entity);
+            entity.OvertimeHour = await _calculationService.CalculateOvertimeHours(entity);
 
             await CreateAsync(entity);
             return entity.Id;
@@ -218,6 +222,7 @@ namespace HRM_BE.Data.Repositories
                 if (Math.Abs((oldValue ?? 0) - newValue) > 0.01)
                 {
                     timesheet.NumberOfWorkingHour = newValue;
+                    timesheet.OvertimeHour = await _calculationService.CalculateOvertimeHours(timesheet);
 
                     if (newValue > 0)
                     {

@@ -295,14 +295,12 @@ namespace HRM_BE.Data.Repositories
                                 ShiftTableName = t.ShiftWork.ShiftTableName,
                                 TimeKeepingLeaveStatus = t.TimeKeepingLeaveStatus,
                                 IsEnoughWork = t.NumberOfWorkingHour >= (t.ShiftWork.ShiftCatalog.WorkingHours ?? 0),
-                                OvertimeHours = (t.ShiftWork.ShiftCatalog.AllowOvertime == true
-                                                 && t.NumberOfWorkingHour.HasValue
+                                OvertimeHours = (t.NumberOfWorkingHour.HasValue
                                                  && t.ShiftWork.ShiftCatalog.WorkingHours.HasValue
                                                  && t.NumberOfWorkingHour > t.ShiftWork.ShiftCatalog.WorkingHours)
                                                 ? t.NumberOfWorkingHour - t.ShiftWork.ShiftCatalog.WorkingHours
                                                 : 0,
-                                IsOvertime = (t.ShiftWork.ShiftCatalog.AllowOvertime == true
-                                              && t.NumberOfWorkingHour.HasValue
+                                IsOvertime = (t.NumberOfWorkingHour.HasValue
                                               && t.ShiftWork.ShiftCatalog.WorkingHours.HasValue
                                               && t.NumberOfWorkingHour > t.ShiftWork.ShiftCatalog.WorkingHours)
                             }).ToList()
@@ -401,14 +399,12 @@ namespace HRM_BE.Data.Repositories
                         ShiftTableName = t.ShiftWork.ShiftTableName,
                         TimeKeepingLeaveStatus = t.TimeKeepingLeaveStatus,
                         IsEnoughWork = t.NumberOfWorkingHour >= (t.ShiftWork.ShiftCatalog.WorkingHours ?? 0),
-                        OvertimeHours = (t.ShiftWork.ShiftCatalog.AllowOvertime == true
-                                         && t.NumberOfWorkingHour.HasValue
+                        OvertimeHours = (t.NumberOfWorkingHour.HasValue
                                          && t.ShiftWork.ShiftCatalog.WorkingHours.HasValue
                                          && t.NumberOfWorkingHour > t.ShiftWork.ShiftCatalog.WorkingHours)
                                         ? t.NumberOfWorkingHour - t.ShiftWork.ShiftCatalog.WorkingHours
                                         : 0,
-                        IsOvertime = (t.ShiftWork.ShiftCatalog.AllowOvertime == true
-                                      && t.NumberOfWorkingHour.HasValue
+                        IsOvertime = (t.NumberOfWorkingHour.HasValue
                                       && t.ShiftWork.ShiftCatalog.WorkingHours.HasValue
                                       && t.NumberOfWorkingHour > t.ShiftWork.ShiftCatalog.WorkingHours)
                     }).ToList()

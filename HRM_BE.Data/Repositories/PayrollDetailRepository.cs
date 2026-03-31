@@ -151,7 +151,8 @@ namespace HRM_BE.Data.Repositories
         }
 
         /// <summary>
-        /// Tính và lưu PayrollDetail cho từng nhân viên. ActualWorkDays (chỉ giờ tiêu chuẩn, tối đa 8h/ngày) và OvertimeAmount được tính từ timesheet trong tháng.
+        /// Tính và lưu PayrollDetail cho từng nhân viên. Giờ tiêu chuẩn được lấy theo ShiftCatalog.WorkingHours của từng ca;
+        /// OvertimeAmount được tính riêng theo hệ số 200%.
         /// Khi dữ liệu chấm công thay đổi hoặc logic tính ngày công/OT thay đổi, cần gọi lại phương thức này cho kỳ lương tương ứng để cập nhật.
         /// </summary>
         public async Task CalculateAndSavePayrollDetails(int payrollId)
@@ -246,6 +247,19 @@ namespace HRM_BE.Data.Repositories
                                 && t.Date.Value.Date <= periodEndDate)
                     .ToList();
 
+                var shiftWorkIds = employeeTimesheetsInPeriod
+                    .Where(t => t.ShiftWorkId.HasValue)
+                    .Select(t => t.ShiftWorkId!.Value)
+                    .Distinct()
+                    .ToList();
+
+                var shiftStandardHoursById = _dbContext.ShiftWorks
+                    .Include(sw => sw.ShiftCatalog)
+                    .Where(sw => shiftWorkIds.Contains(sw.Id))
+                    .ToDictionary(
+                        sw => sw.Id,
+                        sw => (decimal)(sw.ShiftCatalog.WorkingHours > 0 ? sw.ShiftCatalog.WorkingHours.Value : 8.0));
+
                 // Lấy bảng KpiDetail theo kỳ lương (theo khoảng ngày periodStartDate/periodEndDate)
                 var kpiDetail = _dbContext.KpiTableDetails.Include(k => k.KpiTable)
                     .FirstOrDefault(k =>
@@ -316,21 +330,24 @@ namespace HRM_BE.Data.Repositories
                 // ActualWorkDays hiển thị trên phiếu lương: ngày đi làm thực tế + ngày nghỉ hưởng lương + ngày nghỉ lễ tết
                 var actualWorkDaysAll = attendanceDays + paidLeaveDaysCount + holidayDaysOff;
 
-                // Ngày công quy đổi từ giờ làm tiêu chuẩn (tối đa 8h/ngày), KHÔNG bao gồm giờ tăng ca.
-                // Giờ tăng ca được tính riêng trong OvertimeAmount (hệ số 200%). Mỗi ngày: chỉ phần <= 8h vào ngày công, phần > 8h vào OT.
-                var normalHoursTotal = employeeTimesheetsInPeriod
-                    .GroupBy(t => t.Date!.Value.Date)
-                    .Sum(g =>
+                // Ngày công quy đổi từ giờ làm tiêu chuẩn theo từng ca (ShiftCatalog.WorkingHours), KHÔNG bao gồm giờ tăng ca.
+                // Giờ tăng ca được tính riêng trong OvertimeAmount với hệ số 200%.
+                var dailySalaryForReceivedSalary = standardWorkDays > 0 ? baseSalary / (decimal)standardWorkDays : 0;
+
+                // Lương trong giờ hành chính theo từng ca: lương ngày / giờ chuẩn ca.
+                var receivedSalaryFromAttendance = employeeTimesheetsInPeriod
+                    .Sum(t =>
                     {
-                        var totalHoursInDay = g.Sum(x => (decimal)(x.NumberOfWorkingHour ?? 0));
-                        return Math.Min(totalHoursInDay, 8m);
+                        var standardHours = GetTimesheetStandardHours(t, shiftStandardHoursById);
+                        if (standardHours <= 0m) return 0m;
+
+                        var workedHours = Math.Max((decimal)(t.NumberOfWorkingHour ?? 0), 0m);
+                        var normalHours = Math.Min(workedHours, standardHours);
+                        var hourlyRateByShift = dailySalaryForReceivedSalary / standardHours;
+                        return normalHours * hourlyRateByShift;
                     });
 
-                // Lương thực nhận tính theo giờ làm trong giờ hành chính (normalHoursTotal), không tính giờ tăng ca
-                // Thêm ngày nghỉ hưởng lương và ngày lễ vào
-                var dailySalaryForReceivedSalary = standardWorkDays > 0 ? baseSalary / (decimal)standardWorkDays : 0;
-                var hourlySalaryForReceivedSalary = dailySalaryForReceivedSalary / 8m;
-                var receivedSalary = (normalHoursTotal * hourlySalaryForReceivedSalary) + 
+                var receivedSalary = receivedSalaryFromAttendance +
                                      (((decimal)paidLeaveDaysCount + holidayDaysOff) * dailySalaryForReceivedSalary);
                 var kpi = contract?.KpiSalary ?? 0;
                 var kpiPercentage = kpiDetail?.CompletionRate ?? 0;
@@ -340,7 +357,6 @@ namespace HRM_BE.Data.Repositories
 
                 // Lương 1 ngày
                 var dailySalary = standardWorkDays > 0 ? baseSalary / (decimal)standardWorkDays : 0;
-                var hourlySalary = dailySalary / 8m;
 
                 // === Các khoản sau đều lấy từ Salary Component (bảng SalaryComponents) theo ComponentCode ===
                 // - Thu nhập: ALLOWANCE_MEAL_TRAVEL, PARKING (và Hoa hồng qua chính sách doanh thu)
@@ -366,27 +382,26 @@ namespace HRM_BE.Data.Repositories
                     receivedSalary: receivedSalary,
                     attendanceDays: attendanceDays);
 
-                // Giờ tăng ca: cùng totalHoursInDay như trên; phần ≤ 8h đã tính vào ngày công (normalHoursTotal), phần > 8h là OT.
-                var rawOtMinutes = employeeTimesheetsInPeriod
-                    .GroupBy(t => t.Date!.Value.Date)
-                    .Sum(g =>
+                // Giờ tăng ca: lấy từ OvertimeHour nếu đã có, nếu không fallback theo giờ chuẩn của ca.
+                // Tiền OT = giờ OT quy đổi * 2 * lương giờ theo ca.
+                var overtimeAmount = employeeTimesheetsInPeriod
+                    .Sum(t =>
                     {
-                        var totalHoursInDay = g.Sum(x => (decimal)(x.NumberOfWorkingHour ?? 0));
-                        var otHoursInDay = Math.Max(totalHoursInDay - 8m, 0m);
-                        return otHoursInDay * 60m;
+                        var standardHours = GetTimesheetStandardHours(t, shiftStandardHoursById);
+                        if (standardHours <= 0m) return 0m;
+
+                        var overtimeHours = (decimal)(t.OvertimeHour ?? 0);
+                        if (overtimeHours <= 0m)
+                        {
+                            overtimeHours = Math.Max((decimal)(t.NumberOfWorkingHour ?? 0) - standardHours, 0m);
+                        }
+
+                        if (overtimeHours <= 0m) return 0m;
+
+                        var roundedOtHours = RoundOtHours(overtimeHours);
+                        var hourlyRateByShift = dailySalary / standardHours;
+                        return roundedOtHours * 2m * hourlyRateByShift;
                     });
-
-                // Quy đổi sang giờ thập phân theo bảng làm tròn phút (làm tròn tới phút trước khi map)
-                var rawOtMinutesRounded = (int)Math.Round(rawOtMinutes, MidpointRounding.AwayFromZero);
-                if (rawOtMinutesRounded < 0) rawOtMinutesRounded = 0;
-
-                var wholeHours = rawOtMinutesRounded / 60;
-                var remainingMinutes = rawOtMinutesRounded % 60;
-                var decimalPart = MapMinutesToOtDecimal(remainingMinutes);
-                var otHoursDecimal = (decimal)wholeHours + decimalPart;
-
-                // Hệ số OT 200%
-                var overtimeAmount = otHoursDecimal * 2m * hourlySalary;
 
                 // ===== Lương phụ trội làm việc ngày nghỉ lễ =====
                 decimal holidayWorkAmount = 0m;
@@ -394,14 +409,14 @@ namespace HRM_BE.Data.Repositories
                 {
 
                     // Tổng giờ làm ngày lễ (chỉ tính những ngày đi làm bình thường, không phải nghỉ phép)
-                    var holidayHours = employeeTimesheetsInPeriod
+                    var holidayTimesheets = employeeTimesheetsInPeriod
                         .Where(t => t.TimeKeepingLeaveStatus == TimeKeepingLeaveStatus.None
                                  && t.Date.HasValue
                                  && holidayDates.Contains(t.Date.Value.Date)
                                  && (t.NumberOfWorkingHour ?? 0) > 0)
-                        .Sum(t => (decimal)(t.NumberOfWorkingHour ?? 0));
+                        .ToList();
 
-                    if (holidayHours > 0)
+                    if (holidayTimesheets.Any())
                     {
                         // Lấy hệ số WorkFactor cho ngày lễ (lấy hệ số cao nhất nếu có nhiều ngày lễ khác nhau)
                         // Mặc định 2.0 nếu không cấu hình (200% theo Luật Lao động VN)
@@ -412,9 +427,17 @@ namespace HRM_BE.Data.Repositories
                             .ToList();
                         var holidayFactor = workFactors.Any() ? workFactors.Max() ?? 2.0m : 2.0m;
 
-                        // Phụ trội = giờ làm ngày lễ × lương giờ × (hệ số - 1)
+                        // Phụ trội = giờ làm ngày lễ × lương giờ theo ca × (hệ số - 1)
                         // Phần lương ngày thường (×1) đã được tính trong ReceivedSalary, chỉ tính phần chênh lệch
-                        holidayWorkAmount = holidayHours * hourlySalary * (holidayFactor - 1m);
+                        holidayWorkAmount = holidayTimesheets.Sum(t =>
+                        {
+                            var standardHours = GetTimesheetStandardHours(t, shiftStandardHoursById);
+                            if (standardHours <= 0m) return 0m;
+
+                            var workedHours = Math.Max((decimal)(t.NumberOfWorkingHour ?? 0), 0m);
+                            var hourlyRateByShift = dailySalary / standardHours;
+                            return workedHours * hourlyRateByShift * (holidayFactor - 1m);
+                        });
                     }
                 }
 
@@ -587,6 +610,33 @@ namespace HRM_BE.Data.Repositories
             if (minutes <= 30) return 0.50m;
             if (minutes <= 45) return 0.75m;
             return 1.00m; // 46-59
+        }
+
+        private static decimal RoundOtHours(decimal overtimeHours)
+        {
+            var rawOtMinutesRounded = (int)Math.Round(overtimeHours * 60m, MidpointRounding.AwayFromZero);
+            if (rawOtMinutesRounded < 0) rawOtMinutesRounded = 0;
+
+            var wholeHours = rawOtMinutesRounded / 60;
+            var remainingMinutes = rawOtMinutesRounded % 60;
+            var decimalPart = MapMinutesToOtDecimal(remainingMinutes);
+
+            return wholeHours + decimalPart;
+        }
+
+        private static decimal GetTimesheetStandardHours(
+            Timesheet timesheet,
+            IReadOnlyDictionary<int, decimal> shiftStandardHoursById)
+        {
+            if (timesheet.ShiftWorkId.HasValue
+                && shiftStandardHoursById.TryGetValue(timesheet.ShiftWorkId.Value, out var shiftHours)
+                && shiftHours > 0m)
+            {
+                return shiftHours;
+            }
+
+            // Fallback to 8h for old/missing shift data.
+            return 8m;
         }
 
         private decimal GetSalaryComponentAmount(int? organizationId, string componentCode, decimal defaultValue)

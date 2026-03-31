@@ -1,6 +1,5 @@
 using HRM_BE.Core.Data.Payroll_Timekeeping.TimekeepingRegulation;
 using HRM_BE.Core.IServices;
-using HRM_BE.Data.SeedWorks;
 using Microsoft.EntityFrameworkCore;
 
 namespace HRM_BE.Data.Services
@@ -36,15 +35,12 @@ namespace HRM_BE.Data.Services
             }
 
             var date = timesheet.Date ?? DateTime.Today;
-            
-            var shiftStart = date.Date.Add(shift.ShiftCatalog.StartTime ?? TimeSpan.Zero);
-            var shiftEnd = date.Date.Add(shift.ShiftCatalog.EndTime ?? TimeSpan.Zero);
 
             var checkInTime = date.Date.Add(timesheet.StartTime.Value);
             var checkOutTime = date.Date.Add(timesheet.EndTime.Value);
 
-            var start = checkInTime > shiftStart ? checkInTime : shiftStart;
-            var end = checkOutTime < shiftEnd ? checkOutTime : shiftEnd;
+            var start = checkInTime;
+            var end = checkOutTime;
 
             if (end <= start)
             {
@@ -85,7 +81,7 @@ namespace HRM_BE.Data.Services
                 .Include(s => s.ShiftCatalog)
                 .FirstOrDefaultAsync(s => s.Id == timesheet.ShiftWorkId);
 
-            if (shift?.ShiftCatalog == null || shift.ShiftCatalog.AllowOvertime != true)
+            if (shift?.ShiftCatalog == null)
             {
                 return 0;
             }

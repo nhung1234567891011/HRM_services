@@ -78,7 +78,7 @@ namespace HRM_BE.Api.Controllers.Payroll_Timekeeping.TimekeepingRegulation
         /// <summary>
         /// Lấy về số lần đi muộn về sớm
         /// </summary>
-        /// <param name="request"></param>
+        /// <param name="request"></param>Tổng giờ
         /// <returns></returns>
         [HttpGet("get-time-sheet-duration-late-or-early")]
         public async Task<ApiResult<TimesheetDurationLateOrEarlyDto>> GetTimesheetDurationLateOrEarly([FromQuery] GetTotalNumberOfDaysOffRequest request)

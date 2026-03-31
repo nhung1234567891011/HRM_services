@@ -4,7 +4,6 @@ using HRM_BE.Core.Constants;
 using HRM_BE.Core.Constants.Identity;
 using HRM_BE.Core.Data.Payroll_Timekeeping.TimekeepingRegulation;
 using HRM_BE.Core.ISeedWorks;
-using HRM_BE.Core.IServices;
 using HRM_BE.Core.Models.Common;
 using HRM_BE.Core.Models.Official_Form.CheckInCheckOut;
 using HRM_BE.Data;
@@ -23,13 +22,11 @@ namespace HRM_BE.Api.Controllers.Official_Form
     {
         private readonly IUnitOfWork _unitOfWork;
         private readonly HrmContext _dbContext;
-        private readonly ITimesheetCalculationService _calculationService;
 
-        public CheckInCheckOutApplicationController(IUnitOfWork unitOfWork, HrmContext dbContext, ITimesheetCalculationService calculationService)
+        public CheckInCheckOutApplicationController(IUnitOfWork unitOfWork, HrmContext dbContext)
         {
             _unitOfWork = unitOfWork;
             _dbContext = dbContext;
-            _calculationService = calculationService;
         }
 
         private int GetCurrentEmployeeId()
@@ -222,7 +219,7 @@ namespace HRM_BE.Api.Controllers.Official_Form
 
             if (status == 1)
             {
-                await ApplyApprovedCheckInCheckOutToTimesheetAsync(application);
+                await ApplyApprovedCheckInCheckOutToTimesheetForUpdateCheckInCheckOutAsync(application);
             }
 
             return ApiResult<bool>.Success("Cập nhật trạng thái đơn checkin/checkout thành công", true);
@@ -307,8 +304,12 @@ namespace HRM_BE.Api.Controllers.Official_Form
                 fileName);
         }
 
-        private async Task ApplyApprovedCheckInCheckOutToTimesheetAsync(HRM_BE.Core.Data.Official_Form.CheckInCheckOutApplication application)
+        private async Task ApplyApprovedCheckInCheckOutToTimesheetForUpdateCheckInCheckOutAsync(HRM_BE.Core.Data.Official_Form.CheckInCheckOutApplication application)
         {
+            var now = DateTime.Now;
+            var currentUserId = User.GetUserId();
+            var currentUserName = User.GetUserName();
+
             var employee = await _dbContext.Employees
                 .Where(e => e.Id == application.EmployeeId && e.IsDeleted != true)
                 .Select(e => new { e.Id, e.OrganizationId })
@@ -342,7 +343,6 @@ namespace HRM_BE.Api.Controllers.Official_Form
             var hasCheckIn = application.CheckType == 0 || application.CheckType == 2;
             var hasCheckOut = application.CheckType == 1 || application.CheckType == 2;
 
-            // Áp dụng logic mới: chấm vào sớm ghi từ giờ bắt đầu ca, chấm ra muộn ghi giờ kết thúc ca
             TimeSpan? adjustedStartTime = null;
             TimeSpan? adjustedEndTime = null;
             double lateDuration = 0;
@@ -351,52 +351,63 @@ namespace HRM_BE.Api.Controllers.Official_Form
             if (hasCheckIn && application.TimeCheckIn.HasValue)
             {
                 var checkInTime = application.TimeCheckIn.Value;
-                if (shiftCatalog?.StartTime != null)
+
+                // Rule for check-in only: if check in early or on-time, counting starts from shift start.
+                if (!hasCheckOut && shiftCatalog?.StartTime.HasValue == true && checkInTime <= shiftCatalog.StartTime.Value)
                 {
-                    if (checkInTime < shiftCatalog.StartTime.Value)
-                    {
-                        // Chấm vào sớm: ghi từ giờ bắt đầu ca
-                        adjustedStartTime = shiftCatalog.StartTime.Value;
-                    }
-                    else
-                    {
-                        // Chấm vào muộn hoặc đúng giờ: ghi giờ chấm thực tế
-                        adjustedStartTime = checkInTime;
-                        lateDuration = (checkInTime - shiftCatalog.StartTime.Value).TotalMinutes;
-                    }
+                    adjustedStartTime = shiftCatalog.StartTime.Value;
                 }
                 else
                 {
                     adjustedStartTime = checkInTime;
                 }
+
+                if (shiftCatalog?.StartTime.HasValue == true && adjustedStartTime.Value > shiftCatalog.StartTime.Value)
+                {
+                    lateDuration = (adjustedStartTime.Value - shiftCatalog.StartTime.Value).TotalMinutes;
+                }
             }
 
             if (hasCheckOut && application.TimeCheckOut.HasValue)
             {
+                // Checkout is always kept as submitted, even when later than shift end.
                 var checkOutTime = application.TimeCheckOut.Value;
-                if (shiftCatalog?.EndTime != null)
+                adjustedEndTime = checkOutTime;
+
+                if (shiftCatalog?.EndTime.HasValue == true)
                 {
-                    if (checkOutTime < shiftCatalog.EndTime.Value)
+                    var baseDate = application.Date.Date;
+                    var checkOutAt = baseDate.Add(checkOutTime);
+                    var shiftEndAt = baseDate.Add(shiftCatalog.EndTime.Value);
+
+                    if (shiftCatalog.StartTime.HasValue)
                     {
-                        // Chấm ra sớm: ghi giờ chấm thực tế
-                        adjustedEndTime = checkOutTime;
-                        earlyLeaveDuration = (shiftCatalog.EndTime.Value - checkOutTime).TotalMinutes;
+                        var shiftStartAt = baseDate.Add(shiftCatalog.StartTime.Value);
+
+                        // Overnight shift: move end to next day and align checkout to the same timeline.
+                        if (shiftEndAt <= shiftStartAt)
+                        {
+                            shiftEndAt = shiftEndAt.AddDays(1);
+
+                            if (checkOutAt <= shiftStartAt)
+                            {
+                                checkOutAt = checkOutAt.AddDays(1);
+                            }
+                        }
                     }
-                    else
+
+                    if (checkOutAt < shiftEndAt)
                     {
-                        // Chấm ra muộn hoặc đúng giờ: ghi giờ kết thúc ca
-                        adjustedEndTime = shiftCatalog.EndTime.Value;
+                        earlyLeaveDuration = (shiftEndAt - checkOutAt).TotalMinutes;
                     }
-                }
-                else
-                {
-                    adjustedEndTime = checkOutTime;
                 }
             }
 
+            Timesheet timesheet;
+
             if (existing == null)
             {
-                var created = new Timesheet
+                timesheet = new Timesheet
                 {
                     EmployeeId = application.EmployeeId,
                     Date = application.Date.Date,
@@ -406,39 +417,128 @@ namespace HRM_BE.Api.Controllers.Official_Form
                     LateDuration = lateDuration,
                     EarlyLeaveDuration = earlyLeaveDuration,
                     TimeKeepingLeaveStatus = TimeKeepingLeaveStatus.None,
-                    TimekeepingType = TimekeepingType.GPS
+                    TimekeepingType = TimekeepingType.GPS,
+                    CreatedBy = currentUserId > 0 ? currentUserId : null,
+                    CreatedName = currentUserName,
+                    CreatedAt = now,
+                    UpdatedBy = currentUserId > 0 ? currentUserId : null,
+                    UpdatedName = currentUserName,
+                    UpdatedAt = now,
+                    IsDeleted = false
                 };
 
-                created.NumberOfWorkingHour = await _calculationService.CalculateWorkingHours(created);
-
-                await _dbContext.Timesheets.AddAsync(created);
+                await _dbContext.Timesheets.AddAsync(timesheet);
             }
             else
             {
+                timesheet = existing;
+
                 if (hasCheckIn && adjustedStartTime.HasValue)
                 {
-                    existing.StartTime = adjustedStartTime;
-                    existing.LateDuration = lateDuration;
+                    timesheet.StartTime = adjustedStartTime;
+                    timesheet.LateDuration = lateDuration;
                 }
 
                 if (hasCheckOut && adjustedEndTime.HasValue)
                 {
-                    existing.EndTime = adjustedEndTime;
-                    existing.EarlyLeaveDuration = earlyLeaveDuration;
+                    timesheet.EndTime = adjustedEndTime;
+                    timesheet.EarlyLeaveDuration = earlyLeaveDuration;
                 }
 
-                if (!existing.ShiftWorkId.HasValue && shiftWork != null)
+                if (!timesheet.ShiftWorkId.HasValue && shiftWork != null)
                 {
-                    existing.ShiftWorkId = shiftWork.Id;
+                    timesheet.ShiftWorkId = shiftWork.Id;
                 }
 
-                existing.TimeKeepingLeaveStatus = TimeKeepingLeaveStatus.None;
-                existing.TimekeepingType ??= TimekeepingType.GPS;
+                timesheet.TimeKeepingLeaveStatus = TimeKeepingLeaveStatus.None;
+                timesheet.TimekeepingType ??= TimekeepingType.GPS;
 
-                existing.NumberOfWorkingHour = await _calculationService.CalculateWorkingHours(existing);
+                timesheet.UpdatedBy = currentUserId > 0 ? currentUserId : null;
+                timesheet.UpdatedName = currentUserName;
+                timesheet.UpdatedAt = now;
+
+                // Backfill old records that were created without audit metadata.
+                if (!timesheet.CreatedAt.HasValue)
+                {
+                    timesheet.CreatedAt = now;
+                }
+
+                if (!timesheet.CreatedBy.HasValue && currentUserId > 0)
+                {
+                    timesheet.CreatedBy = currentUserId;
+                }
+
+                if (string.IsNullOrWhiteSpace(timesheet.CreatedName))
+                {
+                    timesheet.CreatedName = currentUserName;
+                }
+            }
+
+            var calculatedWorkingHours = CalculateWorkingHoursForCheckInCheckOut(timesheet, shiftCatalog);
+            timesheet.NumberOfWorkingHour = calculatedWorkingHours;
+
+            var standardHours = shiftCatalog?.WorkingHours ?? 8.0;
+            timesheet.OvertimeHour = calculatedWorkingHours > standardHours
+                ? Math.Round(calculatedWorkingHours - standardHours, 2)
+                : 0;
+
+            if (calculatedWorkingHours + 0.01 >= standardHours)
+            {
+                // If total hours already meet shift standard, do not keep early-leave penalty.
+                timesheet.EarlyLeaveDuration = 0;
             }
 
             await _dbContext.SaveChangesAsync();
+        }
+
+        private static double CalculateWorkingHoursForCheckInCheckOut(
+            Timesheet timesheet,
+            HRM_BE.Core.Data.Payroll_Timekeeping.Shift.ShiftCatalog? shiftCatalog)
+        {
+            if (!timesheet.StartTime.HasValue || !timesheet.EndTime.HasValue)
+            {
+                return 0;
+            }
+
+            var date = timesheet.Date ?? DateTime.Today;
+            var start = date.Date.Add(timesheet.StartTime.Value);
+            var end = date.Date.Add(timesheet.EndTime.Value);
+
+            if (end <= start)
+            {
+                end = end.AddDays(1);
+            }
+
+            var workingHours = (end - start).TotalHours;
+
+            if (shiftCatalog?.TakeABreak == true
+                && shiftCatalog.StartTakeABreak.HasValue
+                && shiftCatalog.EndTakeABreak.HasValue)
+            {
+                var breakStart = date.Date.Add(shiftCatalog.StartTakeABreak.Value);
+                var breakEnd = date.Date.Add(shiftCatalog.EndTakeABreak.Value);
+
+                if (breakEnd <= breakStart)
+                {
+                    breakEnd = breakEnd.AddDays(1);
+                }
+
+                // For overnight shifts, break time like 01:00 belongs to next day timeline.
+                if (breakStart < start)
+                {
+                    breakStart = breakStart.AddDays(1);
+                    breakEnd = breakEnd.AddDays(1);
+                }
+
+                if (start < breakEnd && end > breakStart)
+                {
+                    var overlapStart = start > breakStart ? start : breakStart;
+                    var overlapEnd = end < breakEnd ? end : breakEnd;
+                    workingHours -= (overlapEnd - overlapStart).TotalHours;
+                }
+            }
+
+            return Math.Max(0, Math.Round(workingHours, 2));
         }
     }
 }

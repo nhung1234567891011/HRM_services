@@ -27,6 +27,8 @@ namespace HRM_BE.Core.Data.Payroll_Timekeeping.TimekeepingRegulation
 
         public double? NumberOfWorkingHour { get; set; }// Số giờ làm bằng bằng EndTime - StartTime
 
+        public double? OvertimeHour { get; set; } = 0; // Số giờ tăng ca (phần vượt quá tiêu chuẩn ca)
+
         public double? LateDuration { get; set; } = 0; // Đi muộn (phút)
 
         public double? EarlyLeaveDuration { get; set; } = 0; // Về sớm (phút)

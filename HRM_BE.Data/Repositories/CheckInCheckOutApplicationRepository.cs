@@ -163,9 +163,6 @@ namespace HRM_BE.Data.Repositories
             entity.TimeCheckIn = string.IsNullOrEmpty(request.TimeCheckIn) ? null : TimeSpan.Parse(request.TimeCheckIn);
             entity.TimeCheckOut = string.IsNullOrEmpty(request.TimeCheckOut) ? null : TimeSpan.Parse(request.TimeCheckOut);
 
-            if (request.CheckInCheckOutStatus.HasValue)
-                entity.CheckInCheckOutStatus = request.CheckInCheckOutStatus.Value;
-
             await UpdateAsync(entity);
             await _dbContext.SaveChangesAsync();
         }
