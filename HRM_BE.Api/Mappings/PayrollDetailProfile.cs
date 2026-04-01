@@ -12,4 +12,3 @@ namespace HRM_BE.Api.Mappings
         }
     }
 }
-
