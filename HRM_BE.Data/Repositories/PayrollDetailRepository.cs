@@ -1109,32 +1109,27 @@ namespace HRM_BE.Data.Repositories
                 throw new Exception($"Chọn ít nhất 1 bảng lương chi tiết để gửi");
             }
 
-            var payrollDetails = await _dbContext.PayrollDetails
-                .Where(p => request.PayrollDetailIds.Contains(p.Id))
-                .Include(p => p.Employee)
+            var payrollDetailIds = request.PayrollDetailIds.Distinct().ToList();
+
+            var payrollIds = await _dbContext.PayrollDetails
+                .Where(p => payrollDetailIds.Contains(p.Id) && p.IsDeleted != true)
+                .Select(p => p.PayrollId)
+                .Distinct()
                 .ToListAsync();
 
-            int? payrollId = null;
-            foreach (var payrollDetail in payrollDetails)
-            {
-                if (payrollDetail == null)
-                {
-                    throw new Exception($"Không tìm thấy bảng lương chi tiết");
-                }
+            var updatedRows = await _dbContext.PayrollDetails
+                .Where(p => payrollDetailIds.Contains(p.Id) && p.IsDeleted != true)
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(p => p.ConfirmationStatus, PayrollConfirmationStatusEmployee.Confirming)
+                    .SetProperty(p => p.ResponseDeadline, request.ResponseDeadline));
 
-                payrollDetail.ConfirmationStatus = PayrollConfirmationStatusEmployee.Confirming;
-                payrollDetail.ResponseDeadline = request.ResponseDeadline;
-                
-                if (!payrollId.HasValue && payrollDetail.PayrollId.HasValue)
-                {
-                    payrollId = payrollDetail.PayrollId.Value;
-                }
+            if (updatedRows == 0)
+            {
+                throw new Exception("Không tìm thấy bảng lương chi tiết");
             }
 
-            await UpdateRangeAsync(payrollDetails);
-
-            // Cập nhật trạng thái xác nhận của bảng lương tổng
-            if (payrollId.HasValue)
+            // Cập nhật trạng thái xác nhận của các bảng lương tổng bị ảnh hưởng
+            foreach (var payrollId in payrollIds.Where(id => id.HasValue).Select(id => id!.Value))
             {
                 await UpdatePayrollConfirmationStatus(payrollId);
             }
@@ -1173,12 +1168,27 @@ namespace HRM_BE.Data.Repositories
                 return new List<PayrollDetailEmailSendDto>();
             }
 
-            var payrollDetails = await _dbContext.PayrollDetails
+            return await _dbContext.PayrollDetails
                 .Where(p => payrollDetailIds.Contains(p.Id) && p.IsDeleted != true)
-                .Include(p => p.Employee)
+                .Select(p => new PayrollDetailEmailSendDto
+                {
+                    Id = p.Id,
+                    PayrollId = p.PayrollId,
+                    EmployeeId = p.EmployeeId,
+                    EmployeeCode = p.EmployeeCode,
+                    FullName = p.FullName,
+                    Email = p.Employee != null ? p.Employee.PersonalEmail : null,
+                    BaseSalary = p.BaseSalary,
+                    StandardWorkDays = p.StandardWorkDays,
+                    ActualWorkDays = p.ActualWorkDays,
+                    ReceivedSalary = p.ReceivedSalary,
+                    KpiSalary = p.KpiSalary,
+                    Bonus = p.Bonus,
+                    TotalSalary = p.TotalSalary,
+                    TotalReceivedSalary = p.TotalReceivedSalary,
+                    ResponseDeadline = p.ResponseDeadline
+                })
                 .ToListAsync();
-
-            return _mapper.Map<List<PayrollDetailEmailSendDto>>(payrollDetails);
         }
 
         /// <summary>
