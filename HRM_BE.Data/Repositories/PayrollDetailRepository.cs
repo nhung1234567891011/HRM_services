@@ -10,6 +10,7 @@ using HRM_BE.Core.Models.Payroll_Timekeeping.Payroll;
 using HRM_BE.Data.SeedWorks;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -25,10 +26,16 @@ namespace HRM_BE.Data.Repositories
     public class PayrollDetailRepository : RepositoryBase<PayrollDetail, int>, IPayrollDetailRepository
     {
         private readonly IMapper _mapper;
+        private readonly ILogger<PayrollDetailRepository> _logger;
 
-        public PayrollDetailRepository(HrmContext context, IMapper mapper, IHttpContextAccessor httpContextAccessor) : base(context, httpContextAccessor)
+        public PayrollDetailRepository(
+            HrmContext context,
+            IMapper mapper,
+            IHttpContextAccessor httpContextAccessor,
+            ILogger<PayrollDetailRepository> logger) : base(context, httpContextAccessor)
         {
             _mapper = mapper;
+            _logger = logger;
         }
 
         public async Task<PayrollDetailDto> GetById(int id)
@@ -230,6 +237,14 @@ namespace HRM_BE.Data.Repositories
             bool IsOverlapWithSelectedRanges(DateTime start, DateTime end) => selectedDateRanges.Any(r => start < r.End && end > r.Start);
 
             var now = DateTime.Now;
+            var selectedRangesText = string.Join(", ", selectedDateRanges.Select(r => $"{r.Start:yyyy-MM-dd}->{r.End:yyyy-MM-dd}"));
+            _logger.LogInformation(
+                "Start payroll detail calculation. PayrollId={PayrollId}, OrganizationId={OrganizationId}, PeriodStart={PeriodStart}, PeriodEnd={PeriodEnd}, SelectedRanges={SelectedRanges}",
+                payrollId,
+                payroll.OrganizationId,
+                periodStartDate.ToString("yyyy-MM-dd"),
+                periodEndDate.ToString("yyyy-MM-dd"),
+                selectedRangesText);
 
             // 1. Lấy danh sách nhân viên thuộc tổ chức của Payroll
             // Điều kiện:
@@ -251,6 +266,11 @@ namespace HRM_BE.Data.Repositories
                 .Include(e => e.StaffPosition)
                 .ToList();
 
+            _logger.LogInformation(
+                "Payroll detail calculation context. PayrollId={PayrollId}, EmployeeCount={EmployeeCount}",
+                payrollId,
+                employees.Count);
+
             var standardWorkDays = _dbContext.ShiftWorks
                 .Where(sw => sw.OrganizationId == payroll.OrganizationId)
                 .Sum(sw => sw.TotalWork);
@@ -263,38 +283,17 @@ namespace HRM_BE.Data.Repositories
                 .Select(h => new { h.Id, h.FromDate, h.ToDate })
                 .ToList();
 
-            var holidayIds = holidaysInPeriod.Select(h => h.Id).ToList();
-            var workFactorsByHolidayId = _dbContext.WorkFactors
-                .Where(wf => holidayIds.Contains(wf.HolidayId ?? 0) && wf.IsDeleted != true)
-                .GroupBy(wf => wf.HolidayId)
-                .ToDictionary(
-                    g => g.Key ?? 0,
-                    g => g.Max(x => x.Factor ?? 2.0m));
-
-            var holidayFactorByDate = new Dictionary<DateTime, decimal>();
+            var holidayDates = new HashSet<DateTime>();
             foreach (var holiday in holidaysInPeriod)
             {
-                var factor = workFactorsByHolidayId.TryGetValue(holiday.Id, out var configuredFactor)
-                    ? configuredFactor
-                    : 2.0m;
-
                 var fromDate = holiday.FromDate.Date < periodStartDate ? periodStartDate : holiday.FromDate.Date;
                 var toDate = holiday.ToDate.Date > periodEndDate ? periodEndDate : holiday.ToDate.Date;
 
                 for (var date = fromDate; date <= toDate; date = date.AddDays(1))
                 {
-                    if (holidayFactorByDate.TryGetValue(date, out var existingFactor))
-                    {
-                        holidayFactorByDate[date] = Math.Max(existingFactor, factor);
-                    }
-                    else
-                    {
-                        holidayFactorByDate[date] = factor;
-                    }
+                    holidayDates.Add(date);
                 }
             }
-
-            var holidayDates = holidayFactorByDate.Keys.ToHashSet();
 
             var payrollDetails = new List<PayrollDetail>();
 
@@ -326,12 +325,16 @@ namespace HRM_BE.Data.Repositories
                     .Distinct()
                     .ToList();
 
-                var shiftStandardHoursById = _dbContext.ShiftWorks
+                var shiftSalaryConfigById = _dbContext.ShiftWorks
                     .Include(sw => sw.ShiftCatalog)
                     .Where(sw => shiftWorkIds.Contains(sw.Id))
                     .ToDictionary(
                         sw => sw.Id,
-                        sw => (decimal)(sw.ShiftCatalog.WorkingHours > 0 ? sw.ShiftCatalog.WorkingHours.Value : 8.0));
+                        sw => (
+                            StandardHours: ResolveShiftStandardHours(sw.ShiftCatalog),
+                            RegularMultiplier: (decimal)(sw.ShiftCatalog.RegularMultiplier > 0 ? sw.ShiftCatalog.RegularMultiplier.Value : 1.0),
+                            HolidayMultiplier: (decimal)(sw.ShiftCatalog.HolidayMultiplier > 0 ? sw.ShiftCatalog.HolidayMultiplier.Value : 2.0)
+                        ));
 
                 // Lấy bảng KpiDetail theo kỳ lương (theo khoảng ngày periodStartDate/periodEndDate)
                 var kpiDetail = _dbContext.KpiTableDetails.Include(k => k.KpiTable)
@@ -385,13 +388,27 @@ namespace HRM_BE.Data.Repositories
                     .Where(l => IsOverlapWithSelectedRanges(l.StartDate.Date, l.EndDate.Date))
                     .Sum(l => l.NumberOfDays);
 
-                // Ngày lễ trong kỳ mà nhân viên KHÔNG đi làm (không có chấm công) → vẫn được tính 1 ngày công (8 tiếng)
-                var holidayDaysOff = holidayDates
+                // Tập ngày đã có đi làm để loại khỏi nhóm nghỉ lễ (tránh cộng trùng khi dữ liệu chấm công thiếu giờ ra).
+                var attendanceDatesForHolidayOff = employeeTimesheetsInPeriod
+                    .Where(t =>
+                        t.TimeKeepingLeaveStatus == TimeKeepingLeaveStatus.None
+                        && t.Date.HasValue
+                        && (
+                            (t.NumberOfWorkingHour ?? 0) > 0
+                            || (t.StartTime.HasValue && t.EndTime.HasValue)
+                        ))
+                    .Select(t => t.Date!.Value.Date)
+                    .ToHashSet();
+
+                // Ngày lễ trong kỳ mà nhân viên KHÔNG đi làm (không có chấm công đi làm) → vẫn được tính 1 ngày công.
+                var holidayDaysOffDates = holidayDates
                     .Where(d => d >= periodStartDate
                              && d <= periodEndDate
                              && IsDateInSelectedRanges(d)
-                             && !workingDayDates.Contains(d))
-                    .Count();
+                             && !attendanceDatesForHolidayOff.Contains(d))
+                    .ToList();
+
+                var holidayDaysOff = holidayDaysOffDates.Count;
 
                 // ActualWorkDays hiển thị trên phiếu lương: ngày đi làm thực tế + ngày nghỉ hưởng lương + ngày nghỉ lễ tết
                 var actualWorkDaysAll = attendanceDays + paidLeaveDaysCount + holidayDaysOff;
@@ -404,22 +421,21 @@ namespace HRM_BE.Data.Repositories
                 var receivedSalaryFromAttendance = employeeTimesheetsInPeriod
                     .Sum(t =>
                     {
-                        var standardHours = GetTimesheetStandardHours(t, shiftStandardHoursById);
-                        if (standardHours <= 0m) return 0m;
+                        var shiftConfig = GetTimesheetShiftConfig(t, shiftSalaryConfigById);
+                        if (shiftConfig.StandardHours <= 0m) return 0m;
 
                         var workedHours = Math.Max((decimal)(t.NumberOfWorkingHour ?? 0), 0m);
-                        var normalHours = Math.Min(workedHours, standardHours);
-                        var hourlyRateByShift = dailySalaryForReceivedSalary / standardHours;
-                        return normalHours * hourlyRateByShift;
+                        var normalHours = Math.Min(workedHours, shiftConfig.StandardHours);
+                        var hourlyRateByShift = dailySalaryForReceivedSalary / shiftConfig.StandardHours;
+                        return normalHours * hourlyRateByShift * shiftConfig.RegularMultiplier;
                     });
 
                 var receivedSalary = receivedSalaryFromAttendance +
-                                     (((decimal)paidLeaveDaysCount + holidayDaysOff) * dailySalaryForReceivedSalary);
+                                     ((decimal)paidLeaveDaysCount * dailySalaryForReceivedSalary);
                 var kpi = contract?.KpiSalary ?? 0;
                 var kpiPercentage = kpiDetail?.CompletionRate ?? 0;
                 var kpiSalary = (decimal)kpi * ((decimal)kpiPercentage / 100);
                 var bonus = kpiDetail?.Bonus ?? 0;
-                var salaryRate = contract?.SalaryRate ?? 1;
 
                 // Lương 1 ngày
                 var dailySalary = standardWorkDays > 0 ? baseSalary / (decimal)standardWorkDays : 0;
@@ -429,6 +445,15 @@ namespace HRM_BE.Data.Repositories
                 // - Khấu trừ: BHXH, BHTN, BHYT, QUY_CONG_DOAN
                 // Nếu không tìm thấy component (đúng OrganizationId + Code + Status=Tracking) thì dùng defaultValue.
                 var organizationIdForComponent = payroll.OrganizationId ?? employee.OrganizationId;
+
+                // SalaryRate hiển thị theo hệ số ngày thường của ca (quy đổi %),
+                // nhưng KHONG dùng để nhân lại vào coreSalary nhằm tránh nhân đôi.
+                var salaryRate = employeeTimesheetsInPeriod
+                    .Where(t => t.TimeKeepingLeaveStatus == TimeKeepingLeaveStatus.None
+                             && (t.NumberOfWorkingHour ?? 0) > 0)
+                    .Select(t => GetTimesheetShiftConfig(t, shiftSalaryConfigById).RegularMultiplier)
+                    .DefaultIfEmpty(1m)
+                    .Average() * 100m;
 
                 var allowanceMealTravel = ResolveSalaryComponentWithRule(
                     organizationIdForComponent,
@@ -453,56 +478,101 @@ namespace HRM_BE.Data.Repositories
                 var overtimeAmount = employeeTimesheetsInPeriod
                     .Sum(t =>
                     {
-                        var standardHours = GetTimesheetStandardHours(t, shiftStandardHoursById);
-                        if (standardHours <= 0m) return 0m;
+                        var shiftConfig = GetTimesheetShiftConfig(t, shiftSalaryConfigById);
+                        if (shiftConfig.StandardHours <= 0m) return 0m;
 
                         var overtimeHours = (decimal)(t.OvertimeHour ?? 0);
                         if (overtimeHours <= 0m)
                         {
-                            overtimeHours = Math.Max((decimal)(t.NumberOfWorkingHour ?? 0) - standardHours, 0m);
+                            overtimeHours = Math.Max((decimal)(t.NumberOfWorkingHour ?? 0) - shiftConfig.StandardHours, 0m);
                         }
 
                         if (overtimeHours <= 0m) return 0m;
 
                         var roundedOtHours = RoundOtHours(overtimeHours);
-                        var hourlyRateByShift = dailySalary / standardHours;
+                        var hourlyRateByShift = dailySalary / shiftConfig.StandardHours;
                         return roundedOtHours * 2m * hourlyRateByShift;
                     });
 
-                // ===== Lương phụ trội làm việc ngày nghỉ lễ =====
+                // ===== Lương phụ trội ngày nghỉ lễ =====
                 decimal holidayWorkAmount = 0m;
+                decimal holidayWorkedAmount = 0m;
+                decimal holidayOffAmount = 0m;
                 if (holidayDates.Any())
                 {
+                    // Dùng ca phổ biến nhất của nhân viên làm fallback cho ngày lễ không có timesheet.
+                    var defaultShiftConfigForHolidayOff = employeeTimesheetsInPeriod
+                        .Where(t => t.ShiftWorkId.HasValue && shiftSalaryConfigById.ContainsKey(t.ShiftWorkId.Value))
+                        .GroupBy(t => t.ShiftWorkId!.Value)
+                        .OrderByDescending(g => g.Count())
+                        .Select(g => shiftSalaryConfigById[g.Key])
+                        .FirstOrDefault();
 
-                    // Tổng giờ làm ngày lễ (chỉ tính những ngày đi làm bình thường, không phải nghỉ phép)
-                    var holidayTimesheets = employeeTimesheetsInPeriod
+                    if (defaultShiftConfigForHolidayOff.StandardHours <= 0m)
+                    {
+                        defaultShiftConfigForHolidayOff = (8m, 1m, 2m);
+                    }
+
+                    // 1) Ngày lễ có đi làm: tính theo số giờ thực tế của timesheet.
+                    var holidayWorkingTimesheets = employeeTimesheetsInPeriod
                         .Where(t => t.TimeKeepingLeaveStatus == TimeKeepingLeaveStatus.None
                                  && t.Date.HasValue
                                  && holidayDates.Contains(t.Date.Value.Date)
                                  && (t.NumberOfWorkingHour ?? 0) > 0)
                         .ToList();
 
-                    if (holidayTimesheets.Any())
+                    if (holidayWorkingTimesheets.Any())
                     {
-                        // Phụ trội = giờ làm ngày lễ × lương giờ theo ca × (hệ số của ngày đó - 1)
-                        // Phần lương ngày thường (×1) đã được tính trong ReceivedSalary, chỉ tính phần chênh lệch.
-                        holidayWorkAmount = holidayTimesheets.Sum(t =>
+                        holidayWorkedAmount = holidayWorkingTimesheets.Sum(t =>
                         {
                             if (!t.Date.HasValue) return 0m;
 
-                            var holidayDate = t.Date.Value.Date;
-                            var holidayFactor = holidayFactorByDate.TryGetValue(holidayDate, out var factor)
-                                ? factor
-                                : 2.0m;
+                            var shiftConfig = GetTimesheetShiftConfig(t, shiftSalaryConfigById);
+                            if (shiftConfig.StandardHours <= 0m) return 0m;
 
-                            var standardHours = GetTimesheetStandardHours(t, shiftStandardHoursById);
-                            if (standardHours <= 0m) return 0m;
+                            var effectiveHolidayMultiplier = shiftConfig.HolidayMultiplier > 0m
+                                ? shiftConfig.HolidayMultiplier
+                                : 2.0m;
+                            if (effectiveHolidayMultiplier <= 0m) return 0m;
 
                             var workedHours = Math.Max((decimal)(t.NumberOfWorkingHour ?? 0), 0m);
-                            var hourlyRateByShift = dailySalary / standardHours;
-                            return workedHours * hourlyRateByShift * (holidayFactor - 1m);
+                            var hourlyRateByShift = dailySalary / shiftConfig.StandardHours;
+                            return workedHours * hourlyRateByShift * effectiveHolidayMultiplier;
                         });
                     }
+
+                    // 2) Ngày lễ nghỉ (không có chấm công đi làm): lấy giờ chuẩn 1 ngày công theo ShiftCatalog để tính phụ trội lễ.
+                    if (holidayDaysOffDates.Any())
+                    {
+                        var holidayTimesheetByDate = employeeTimesheetsInPeriod
+                            .Where(t => t.Date.HasValue)
+                            .GroupBy(t => t.Date!.Value.Date)
+                            .ToDictionary(g => g.Key, g => g.FirstOrDefault());
+
+                        holidayOffAmount = holidayDaysOffDates.Sum(holidayDate =>
+                        {
+                            var hasTimesheetOnDate = holidayTimesheetByDate.TryGetValue(holidayDate, out var holidayTimesheetOnDate)
+                                && holidayTimesheetOnDate != null;
+
+                            var shiftConfig = hasTimesheetOnDate
+                                ? GetTimesheetShiftConfig(holidayTimesheetOnDate!, shiftSalaryConfigById)
+                                : defaultShiftConfigForHolidayOff;
+
+                            if (shiftConfig.StandardHours <= 0m) return 0m;
+
+                            var effectiveHolidayMultiplier = shiftConfig.HolidayMultiplier > 0m
+                                ? shiftConfig.HolidayMultiplier
+                                : 2.0m;
+                            if (effectiveHolidayMultiplier <= 0m) return 0m;
+
+                            // Nghỉ lễ không đi làm: tính theo lương 1 ngày * hệ số ngày lễ của ca.
+                            var workedHours = shiftConfig.StandardHours;
+                            var hourlyRateByShift = dailySalary / shiftConfig.StandardHours;
+                            return workedHours * hourlyRateByShift * effectiveHolidayMultiplier;
+                        });
+                    }
+
+                    holidayWorkAmount = holidayWorkedAmount + holidayOffAmount;
                 }
 
                 // Hoa hồng doanh thu (cấu hình theo bậc)
@@ -561,14 +631,45 @@ namespace HRM_BE.Data.Repositories
                     receivedSalary: receivedSalary,
                     attendanceDays: attendanceDays);
 
-                // Công thức: Lương lõi + (Phụ cấp + Gửi xe + Hoa hồng + OT từ cấu hình) - (BHXH + BHTN + BHYT + Quỹ công đoàn từ Salary Component) - Khấu trừ khác
-                var coreSalary = ((decimal)receivedSalary + (decimal)kpiSalary + (decimal)bonus) * ((decimal)salaryRate / 100);
+                // Công thức lương lõi: chỉ gồm lương theo công + KPI + thưởng.
+                var coreSalary = (decimal)receivedSalary + (decimal)kpiSalary + (decimal)bonus;
 
                 // Tổng lương (trước trừ BHXH, Quỹ công đoàn): Lương cứng + Phụ cấp đi lại ăn trưa + Tiền gửi xe + Hoa hồng + Lương tăng ca + Phụ trội ngày lễ
                 var totalSalary = coreSalary + allowanceMealTravel + parkingAmount + overtimeAmount + holidayWorkAmount + commissionAmount;
 
                 // Tổng thực nhận = Tổng lương - (BHXH+BHTN+BHYT) - Quỹ công đoàn - Khấu trừ khác
                 var totalReceivedSalary = totalSalary - (totalDeductions + totalInsuranceDeduction + unionFeeAmount);
+
+                _logger.LogInformation(
+                    "Payroll detail calculated. PayrollId={PayrollId}, EmployeeId={EmployeeId}, EmployeeCode={EmployeeCode}, FullName={FullName}, BaseSalary={BaseSalary}, StandardWorkDays={StandardWorkDays}, AttendanceDays={AttendanceDays}, PaidLeaveDays={PaidLeaveDays}, HolidayDaysOff={HolidayDaysOff}, ActualWorkDays={ActualWorkDays}, ReceivedSalary={ReceivedSalary}, KPI={KPI}, KpiPercent={KpiPercent}, KpiSalary={KpiSalary}, Bonus={Bonus}, SalaryRate={SalaryRate}, AllowanceMealTravel={AllowanceMealTravel}, ParkingAmount={ParkingAmount}, OvertimeAmount={OvertimeAmount}, HolidayWorkedAmount={HolidayWorkedAmount}, HolidayOffAmount={HolidayOffAmount}, HolidayWorkAmount={HolidayWorkAmount}, CommissionAmount={CommissionAmount}, InsuranceDeduction={InsuranceDeduction}, UnionFee={UnionFee}, OtherDeductions={OtherDeductions}, TotalSalary={TotalSalary}, TotalReceivedSalary={TotalReceivedSalary}",
+                    payrollId,
+                    employee.Id,
+                    employee.EmployeeCode,
+                    (employee.LastName + " " + employee.FirstName).Trim(),
+                    baseSalary,
+                    standardWorkDays,
+                    attendanceDays,
+                    paidLeaveDaysCount,
+                    holidayDaysOff,
+                    actualWorkDaysAll,
+                    receivedSalary,
+                    kpi,
+                    kpiPercentage,
+                    kpiSalary,
+                    bonus,
+                    salaryRate,
+                    allowanceMealTravel,
+                    parkingAmount,
+                    overtimeAmount,
+                    holidayWorkedAmount,
+                    holidayOffAmount,
+                    holidayWorkAmount,
+                    commissionAmount,
+                    totalInsuranceDeduction,
+                    unionFeeAmount,
+                    totalDeductions,
+                    totalSalary,
+                    totalReceivedSalary);
 
                 // 3. Lưu vào bảng PayrollDetail
                 payrollDetails.Add(new PayrollDetail
@@ -590,7 +691,7 @@ namespace HRM_BE.Data.Repositories
                     KpiSalary = (decimal)kpiSalary,
                     Bonus = (decimal)bonus,
 
-                    SalaryRate = (decimal)salaryRate,
+                    SalaryRate = salaryRate,
                     AllowanceMealTravel = allowanceMealTravel,
                     ParkingAmount = parkingAmount,
                     OvertimeAmount = overtimeAmount,
@@ -606,6 +707,11 @@ namespace HRM_BE.Data.Repositories
             }
 
             await CreateRangeAsync(payrollDetails);
+
+            _logger.LogInformation(
+                "Finished payroll detail calculation. PayrollId={PayrollId}, DetailCount={DetailCount}",
+                payrollId,
+                payrollDetails.Count);
         }
 
         private decimal ResolveSalaryComponentWithRule(
@@ -688,18 +794,42 @@ namespace HRM_BE.Data.Repositories
             return wholeHours + decimalPart;
         }
 
-        private static decimal GetTimesheetStandardHours(
+        private static (decimal StandardHours, decimal RegularMultiplier, decimal HolidayMultiplier) GetTimesheetShiftConfig(
             Timesheet timesheet,
-            IReadOnlyDictionary<int, decimal> shiftStandardHoursById)
+            IReadOnlyDictionary<int, (decimal StandardHours, decimal RegularMultiplier, decimal HolidayMultiplier)> shiftSalaryConfigById)
         {
             if (timesheet.ShiftWorkId.HasValue
-                && shiftStandardHoursById.TryGetValue(timesheet.ShiftWorkId.Value, out var shiftHours)
-                && shiftHours > 0m)
+                && shiftSalaryConfigById.TryGetValue(timesheet.ShiftWorkId.Value, out var shiftConfig)
+                && shiftConfig.StandardHours > 0m)
             {
-                return shiftHours;
+                return shiftConfig;
             }
 
             // Fallback to 8h for old/missing shift data.
+            return (8m, 1m, 2m);
+        }
+
+        private static decimal ResolveShiftStandardHours(ShiftCatalog? shiftCatalog)
+        {
+            if (shiftCatalog?.WorkingHours > 0)
+            {
+                return (decimal)shiftCatalog.WorkingHours.Value;
+            }
+
+            if (shiftCatalog?.StartTime.HasValue == true && shiftCatalog.EndTime.HasValue)
+            {
+                var startTime = shiftCatalog.StartTime.Value;
+                var endTime = shiftCatalog.EndTime.Value;
+                var duration = endTime >= startTime
+                    ? endTime - startTime
+                    : (TimeSpan.FromDays(1) - startTime) + endTime;
+
+                if (duration.TotalHours > 0)
+                {
+                    return (decimal)duration.TotalHours;
+                }
+            }
+
             return 8m;
         }
 
@@ -867,7 +997,6 @@ namespace HRM_BE.Data.Repositories
             if (request.SalaryRate.HasValue)
             {
                 payrollDetail.SalaryRate = request.SalaryRate.Value;
-                shouldRecalcTotalSalary = true;
             }
 
             if (shouldRecalcReceivedSalary)
@@ -875,9 +1004,10 @@ namespace HRM_BE.Data.Repositories
                 var baseSalary = payrollDetail.BaseSalary ?? 0;
                 var standardWorkDays = payrollDetail.StandardWorkDays ?? 0;
                 var actualWorkDays = payrollDetail.ActualWorkDays ?? 0;
+                var salaryRate = payrollDetail.SalaryRate ?? 100m;
 
                 payrollDetail.ReceivedSalary = standardWorkDays > 0
-                    ? (baseSalary / standardWorkDays) * (decimal)actualWorkDays
+                    ? (baseSalary / standardWorkDays) * (decimal)actualWorkDays * (salaryRate / 100m)
                     : 0;
             }
 
@@ -893,7 +1023,6 @@ namespace HRM_BE.Data.Repositories
                 var receivedSalary = payrollDetail.ReceivedSalary ?? 0;
                 var kpiSalary = payrollDetail.KpiSalary ?? 0;
                 var bonus = payrollDetail.Bonus ?? 0;
-                var salaryRate = payrollDetail.SalaryRate ?? 100;
 
                 var allowanceMealTravel = payrollDetail.AllowanceMealTravel ?? 0m;
                 var parkingAmount = payrollDetail.ParkingAmount ?? 0m;
@@ -904,7 +1033,7 @@ namespace HRM_BE.Data.Repositories
                 var unionFeeAmount = payrollDetail.UnionFeeAmount ?? 0m;
 
                 // Công thức: Lương cứng + Phụ cấp + Gửi xe + Hoa hồng + OT + Phụ trội ngày lễ - (BHXH+BHTN+BHYT) - Quỹ công đoàn
-                var coreSalary = (receivedSalary + kpiSalary + bonus) * (salaryRate / 100);
+                var coreSalary = receivedSalary + kpiSalary + bonus;
                 payrollDetail.TotalSalary = coreSalary + allowanceMealTravel + parkingAmount + overtimeAmount + holidayWorkAmount + commissionAmount;
 
                 var totalDeductions = 0m;

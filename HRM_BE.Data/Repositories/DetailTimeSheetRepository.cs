@@ -246,6 +246,7 @@ namespace HRM_BE.Data.Repositories
 
             var organizationDescendantIds = await GetAllChildOrganizationIds(rootOrganizationId);
             organizationDescendantIds.Add(rootOrganizationId);
+            var sharedHolidays = await GetOrganizationHolidaysAsync(rootOrganizationId);
 
             var startDate = detailTimeSheet.StartDate.Value.Date;
             var endDate = detailTimeSheet.EndDate.Value.Date;
@@ -306,19 +307,15 @@ namespace HRM_BE.Data.Repositories
                             }).ToList()
                         }).ToList(),
                     IsOffical = e.Contracts.Any(c => !c.ContractName.Contains(ContractConstant.InterContract) && c.SignStatus == SignStatus.Signed),
-                    Holidays = e.Organization.Holidays.Select(h => new HolidayDto
-                    {
-                        Id = h.Id,
-                        Name = h.Name,
-                        FromDate = h.FromDate,
-                        ToDate = h.ToDate,
-                        OrganizationId = h.OrganizationId,
-                        ApplyObject = h.ApplyObject
-                    }).ToList(),
+                    Holidays = new List<HolidayDto>(),
                     PermittedLeaves = new List<PermittedLeaveDto>()
                 }).ToListAsync();
 
             await FillPermittedLeavesAsync(data, startDate, endDate);
+            foreach (var item in data)
+            {
+                item.Holidays = sharedHolidays;
+            }
 
             return data;
         }
@@ -349,6 +346,7 @@ namespace HRM_BE.Data.Repositories
             // Lấy toàn bộ phòng ban con (cả cây) + chính nó
             var organizationDescendantIds = await GetAllChildOrganizationIds(rootOrganizationId);
             organizationDescendantIds.Add(rootOrganizationId);
+            var sharedHolidays = await GetOrganizationHolidaysAsync(rootOrganizationId);
 
             var query = _dbContext.Employees.Where(e => organizationDescendantIds.Contains(e.OrganizationId.Value) && e.AccountStatus == AccountStatus.Active).AsNoTracking();
 
@@ -410,20 +408,16 @@ namespace HRM_BE.Data.Repositories
                     }).ToList()
                 }).ToList(),
                 IsOffical = e.Contracts.Where(c => !c.ContractName.Contains(ContractConstant.InterContract) && c.SignStatus == SignStatus.Signed).FirstOrDefault() != null ? true : false,
-                Holidays = e.Organization.Holidays.Select(h => new HolidayDto
-                {
-                    Id = h.Id,
-                    Name = h.Name,
-                    FromDate = h.FromDate,
-                    ToDate = h.ToDate,
-                    OrganizationId = h.OrganizationId,
-                    ApplyObject = h.ApplyObject
-                }).ToList(),
+                Holidays = new List<HolidayDto>(),
                 PermittedLeaves = new List<PermittedLeaveDto>()
             }).ToListAsync();
             #endregion
 
             await FillPermittedLeavesAsync(data, detailTimeSheet.StartDate!.Value.Date, detailTimeSheet.EndDate!.Value.Date);
+            foreach (var item in data)
+            {
+                item.Holidays = sharedHolidays;
+            }
 
             var result = new PagingResult<GetDetailTimesheetWithEmployeeDto>(data, pageIndex, pageSize, sortBy, orderBy, total);
             //var leaveApplications = await _dbContext.LeaveApplications.Where( s => s.StartDate <= detailTimeSheet.EndDate).ToListAsync();
@@ -484,6 +478,22 @@ namespace HRM_BE.Data.Repositories
             }
 
             return leaveDays.OrderBy(d => d).ToList();
+        }
+
+        private async Task<List<HolidayDto>> GetOrganizationHolidaysAsync(int organizationId)
+        {
+            return await _dbContext.Holidays
+                .AsNoTracking()
+                .Where(h => h.IsDeleted != true && h.OrganizationId == organizationId)
+                .Select(h => new HolidayDto
+                {
+                    Id = h.Id,
+                    Name = h.Name,
+                    FromDate = h.FromDate,
+                    ToDate = h.ToDate,
+                    OrganizationId = h.OrganizationId,
+                    ApplyObject = h.ApplyObject
+                }).ToListAsync();
         }
 
         private async Task FillPermittedLeavesAsync(List<GetDetailTimesheetWithEmployeeDto> items, DateTime startDate, DateTime endDate)

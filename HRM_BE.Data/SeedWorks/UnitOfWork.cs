@@ -14,6 +14,7 @@ using HRM_BE.Core.Data.Payroll_Timekeeping.TimekeepingRegulation;
 using HRM_BE.Data.Migrations;
 using HRM_BE.Core.Data.Salary;
 using HRM_BE.Core.Data.Task;
+using Microsoft.Extensions.Logging;
 
 
 namespace HRM_BE.Data.SeedWorks
@@ -22,7 +23,13 @@ namespace HRM_BE.Data.SeedWorks
     {
         private readonly HrmContext _context;
 
-        public UnitOfWork(HrmContext context, IMapper mapper, UserManager<User> userManager, IHttpContextAccessor httpContextAccessor, ITimesheetCalculationService calculationService)
+        public UnitOfWork(
+            HrmContext context,
+            IMapper mapper,
+            UserManager<User> userManager,
+            IHttpContextAccessor httpContextAccessor,
+            ITimesheetCalculationService calculationService,
+            ILogger<PayrollDetailRepository> payrollDetailLogger)
         {
             _context = context;
             Banners = new BannerRepository(context, mapper,httpContextAccessor);
@@ -70,7 +77,7 @@ namespace HRM_BE.Data.SeedWorks
             KpiTableDetails = new KpiTableDetailRepository(context, mapper, httpContextAccessor);
             LeavePermissions = new LeavePermissionRepository(context, mapper, httpContextAccessor);
             Payrolls = new PayrollRepository(context, mapper, httpContextAccessor);
-            PayrollDetails = new PayrollDetailRepository(context, mapper, httpContextAccessor);
+            PayrollDetails = new PayrollDetailRepository(context, mapper, httpContextAccessor, payrollDetailLogger);
             PayrollInquiries = new PayrollInquiryRepository(context, mapper, httpContextAccessor);
             RevenueCommissionPolicies = new RevenueCommissionPolicyRepository(context, mapper, httpContextAccessor);
             Departments=new DepartmentRepository(context, mapper, httpContextAccessor);

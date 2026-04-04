@@ -35,6 +35,7 @@ namespace HRM_BE.Core.Models.Payroll_Timekeeping.Payroll
         public decimal? AllowanceMealTravel { get; set; } // Phụ cấp đi lại, ăn trưa
         public decimal? ParkingAmount { get; set; } // Tiền gửi xe công ty
         public decimal? OvertimeAmount { get; set; } // Lương tăng ca
+        public decimal? HolidayWorkAmount { get; set; } // Lương ngày lễ (phần cộng thêm)
         public decimal? CommissionAmount { get; set; } // Hoa hồng doanh thu
         public decimal? BhxhAmount { get; set; } // BHXH (+ BHTN + BHYT gộp) phải trừ
 
