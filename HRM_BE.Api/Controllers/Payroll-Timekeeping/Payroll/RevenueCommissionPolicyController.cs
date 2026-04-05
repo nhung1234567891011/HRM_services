@@ -37,14 +37,14 @@ namespace HRM_BE.Api.Controllers.Payroll_Timekeeping.Payroll
         }
 
         [HttpPut("update")]
-        public async Task<IActionResult> Update([FromQuery] int id, [FromBody] UpdateRevenueCommissionPolicyRequest request)
+        public async Task<IActionResult> Update(int id, [FromBody] UpdateRevenueCommissionPolicyRequest request)
         {
             await _unitOfWork.RevenueCommissionPolicies.Update(id, request);
             return Ok(ApiResult<bool>.Success("Cập nhật cấu hình hoa hồng thành công", true));
         }
 
         [HttpPut("update-status")]
-        public async Task<IActionResult> UpdateStatus([FromQuery] int id, [FromQuery] Status status)
+        public async Task<IActionResult> UpdateStatus(int id, Status status)
         {
             await _unitOfWork.RevenueCommissionPolicies.UpdateStatus(id, status);
             return Ok(ApiResult<bool>.Success("Cập nhật trạng thái cấu hình hoa hồng thành công", true));

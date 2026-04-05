@@ -39,7 +39,7 @@ namespace HRM_BE.Api.Controllers.Salary
         }
 
         [HttpPut("update")]
-        public async Task<IActionResult> Update([FromQuery] int KpiTableDetailId, [FromBody] UpdateKpiTableDetailRequest request)
+        public async Task<IActionResult> Update(int KpiTableDetailId, [FromBody] UpdateKpiTableDetailRequest request)
         {
 
             await _unitOfWork.KpiTableDetails.Update(KpiTableDetailId, request);
