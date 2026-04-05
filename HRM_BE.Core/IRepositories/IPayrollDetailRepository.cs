@@ -13,6 +13,7 @@ namespace HRM_BE.Core.IRepositories
     public interface IPayrollDetailRepository : IRepositoryBase<PayrollDetail, int>
     {
         Task<PagingResult<PayrollDetailDto>> Paging(int? organizationId, string? name, int? payrollId, int? employeeId, string? sortBy, string? orderBy, int pageIndex = 1, int pageSize = 10);
+        Task<List<PayrollDetailDto>> GetExportData(ExportPayrollDetailRequest request);
         Task<PayrollDetailDto> GetById(int id);
         Task CalculateAndSavePayrollDetails(int payrollId);
         Task RecalculateAndSavePayrollDetails(int payrollId);

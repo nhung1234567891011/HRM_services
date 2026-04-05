@@ -134,10 +134,17 @@ namespace HRM_BE.Data.Repositories
             var organizationId = await _dbContext.Employees.Where(x => x.Id == employeeId).Select(x => x.OrganizationId).FirstOrDefaultAsync();
             var contract = await _dbContext.Contracts.Where(c => c.EmployeeId == employeeId && c.ExpiredStatus != true && c.SignStatus==Core.Data.Profile.SignStatus.Signed && c.IsDeleted!=true).FirstOrDefaultAsync();
 
-            if (contract.ContractName.ToLower().Replace(" ", "").Contains(ContractConstant.OfficalContract.ToLower().Replace(" ",""))) {
+            if (string.IsNullOrWhiteSpace(contract?.ContractName))
+            {
+                return holidayByDayDtos;
+            }
+
+            var contractName = contract.ContractName.ToLower().Replace(" ", "");
+            var officialContract = ContractConstant.OfficalContract.ToLower().Replace(" ", "");
+
+            if (contractName.Contains(officialContract)) {
 
                 var holidays = await _dbContext.Holidays.Where(h => h.FromDate.Date >= startDate.Date && h.ToDate.Date <= endDate.Date && h.OrganizationId == organizationId).ToListAsync();
-                var total = 0;
                 if (holidays.Count() <= 0)
                 {
                     return holidayByDayDtos;
@@ -150,8 +157,6 @@ namespace HRM_BE.Data.Repositories
                         holidayByDayDtos.Add(day);
                     }
                 }
-
-                return holidayByDayDtos;
             }
 
             return holidayByDayDtos;

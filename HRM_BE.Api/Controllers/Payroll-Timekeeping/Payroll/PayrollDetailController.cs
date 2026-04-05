@@ -8,6 +8,7 @@ using HRM_BE.Api.Services.Interfaces;
 using Microsoft.Data.SqlClient;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using OfficeOpenXml;
 using System.Text;
 
 namespace HRM_BE.Api.Controllers.Payroll_Timekeeping.Payroll
@@ -35,6 +36,56 @@ namespace HRM_BE.Api.Controllers.Payroll_Timekeeping.Payroll
         {
             var result = await _unitOfWork.PayrollDetails.Paging(request.OrganizationId, request.Name, request.PayrollId, request.EmployeeId, request.SortBy, request.OrderBy, request.PageIndex, request.PageSize);
             return result;
+        }
+
+        /// <summary>
+        /// HRM - Xuất danh sách bảng lương chi tiết ra Excel theo bộ lọc hiện tại.
+        /// </summary>
+        [HttpGet("export-excel")]
+        public async Task<IActionResult> ExportExcel([FromQuery] ExportPayrollDetailRequest request)
+        {
+            var items = await _unitOfWork.PayrollDetails.GetExportData(request);
+
+            ExcelPackage.LicenseContext = LicenseContext.NonCommercial;
+
+            using var package = new ExcelPackage();
+            var ws = package.Workbook.Worksheets.Add("BangLuongChiTiet");
+
+            var headers = new[]
+            {
+                "STT",
+                "Mã NV",
+                "Họ và tên",
+                "Đơn vị",
+                "Tổng lương"
+            };
+
+            for (int c = 0; c < headers.Length; c++)
+            {
+                ws.Cells[1, c + 1].Value = headers[c];
+            }
+
+            for (int i = 0; i < items.Count; i++)
+            {
+                var row = i + 2;
+                var item = items[i];
+
+                ws.Cells[row, 1].Value = i + 1;
+                ws.Cells[row, 2].Value = item.EmployeeCode;
+                ws.Cells[row, 3].Value = item.FullName;
+                ws.Cells[row, 4].Value = item.OrganizationName;
+                ws.Cells[row, 5].Value = item.TotalSalary;
+            }
+
+            ws.Cells[1, 1, 1, headers.Length].Style.Font.Bold = true;
+            ws.Cells[1, 1, items.Count + 1, headers.Length].AutoFitColumns();
+            ws.Column(5).Style.Numberformat.Format = "#,##0.00";
+            ws.View.FreezePanes(2, 1);
+
+            var fileName = $"BangLuongChiTiet_{DateTime.Now:yyyyMMdd_HHmmss}.xlsx";
+            var bytes = package.GetAsByteArray();
+
+            return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", fileName);
         }
 
         [HttpGet("get-by-id")]

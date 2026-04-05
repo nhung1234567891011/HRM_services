@@ -279,6 +279,7 @@ namespace HRM_BE.Data.Repositories
                     EmployeeCode = e.EmployeeCode,
                     FirstName = e.FirstName,
                     LastName = e.LastName,
+                    OrganizationName = e.Organization.OrganizationName,
                     Timesheets = e.Timesheets
                         .Where(t => t.IsDeleted != true && t.Date.HasValue && t.Date.Value.Date >= startDate && t.Date.Value.Date <= endDate)
                         .GroupBy(t => t.Date!.Value.Date)
@@ -381,6 +382,7 @@ namespace HRM_BE.Data.Repositories
                 EmployeeCode = e.EmployeeCode,
                 FirstName = e.FirstName,
                 LastName = e.LastName,
+                OrganizationName = e.Organization.OrganizationName,
                 Timesheets = e.Timesheets.Where(t => t.Date.Value.Date >= detailTimeSheet.StartDate.Value.Date
                 && t.Date.Value.Date <= detailTimeSheet.EndDate.Value.Date).GroupBy(t => t.Date.Value.Date)
                 .Select(g => new ConfirmTimeSheetDto

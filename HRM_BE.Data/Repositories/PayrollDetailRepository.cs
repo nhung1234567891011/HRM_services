@@ -148,6 +148,68 @@ namespace HRM_BE.Data.Repositories
             return result;
         }
 
+        public async Task<List<PayrollDetailDto>> GetExportData(ExportPayrollDetailRequest request)
+        {
+            var query = _dbContext.PayrollDetails
+                .Where(p => p.IsDeleted != true)
+                .AsQueryable();
+
+            if (request.OrganizationId.HasValue)
+            {
+                query = query.Where(p => p.OrganizationId == request.OrganizationId);
+            }
+
+            if (request.EmployeeId.HasValue)
+            {
+                query = query.Where(p => p.EmployeeId == request.EmployeeId);
+            }
+
+            if (!string.IsNullOrWhiteSpace(request.Name))
+            {
+                var keyword = request.Name.Trim();
+                var pattern = $"%{keyword}%";
+
+                query = query.Where(p =>
+                    (p.FullName != null && EF.Functions.Like(p.FullName, pattern)) ||
+                    (p.EmployeeCode != null && EF.Functions.Like(p.EmployeeCode, pattern)));
+            }
+
+            if (request.DetailTimesheetId.HasValue)
+            {
+                var detailTimesheetId = request.DetailTimesheetId.Value;
+                query = query.Where(p =>
+                    p.PayrollId.HasValue &&
+                    _dbContext.PayrollSummaryTimesheets.Any(ps =>
+                        ps.PayrollId == p.PayrollId &&
+                        ps.SummaryTimesheetNameId.HasValue &&
+                        _dbContext.SummaryTimesheetNameDetailTimesheetNames.Any(sd =>
+                            sd.SummaryTimesheetNameId == ps.SummaryTimesheetNameId &&
+                            sd.DetailTimesheetNameId == detailTimesheetId)));
+            }
+
+            if (request.StartDate.HasValue || request.EndDate.HasValue)
+            {
+                var startDate = request.StartDate?.Date ?? DateTime.MinValue.Date;
+                var endDate = request.EndDate?.Date ?? DateTime.MaxValue.Date;
+
+                query = query.Where(p =>
+                    p.PayrollId.HasValue &&
+                    _dbContext.PayrollSummaryTimesheets.Any(ps =>
+                        ps.PayrollId == p.PayrollId &&
+                        ps.SummaryTimesheetNameId.HasValue &&
+                        _dbContext.SummaryTimesheetNameDetailTimesheetNames.Any(sd =>
+                            sd.SummaryTimesheetNameId == ps.SummaryTimesheetNameId &&
+                            sd.DetailTimesheetName.StartDate.HasValue &&
+                            sd.DetailTimesheetName.EndDate.HasValue &&
+                            sd.DetailTimesheetName.StartDate.Value.Date <= endDate &&
+                            sd.DetailTimesheetName.EndDate.Value.Date >= startDate)));
+            }
+
+            query = query.ApplySorting(request.SortBy ?? "Id", request.OrderBy ?? "desc");
+
+            return await _mapper.ProjectTo<PayrollDetailDto>(query).ToListAsync();
+        }
+
 
         private async Task<PayrollDetail> GetPayrollDetailAndCheckExist(int payrollDetailId)
         {
