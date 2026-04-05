@@ -28,9 +28,32 @@ namespace HRM_BE.Data.Repositories
 
         public async Task<PayrollInquiryDto> Create(CreatePayrollInquiryRequest request)
         {
+            if (request?.PayrollDetailId is null)
+                throw new ValidationException("PayrollDetailId không được để trống");
+
+            var content = request.Content?.Trim();
+            if (string.IsNullOrWhiteSpace(content))
+                throw new ValidationException("Nội dung thắc mắc không được để trống");
+
+            var payrollDetail = await _dbContext.PayrollDetails
+                .AsNoTracking()
+                .FirstOrDefaultAsync(p => p.Id == request.PayrollDetailId && p.IsDeleted != true);
+            if (payrollDetail is null)
+                throw new EntityNotFoundException(nameof(PayrollDetail), $"Id = {request.PayrollDetailId}");
+
             var entity = _mapper.Map<PayrollInquiry>(request);
+            entity.Content = content;
+            entity.Status = InquiryStatus.Pending;
             await CreateAsync(entity);
-            return _mapper.Map<PayrollInquiryDto>(entity);
+
+            var createdEntity = await _dbContext.PayrollInquiries
+                .Include(p => p.PayrollDetail)
+                .ThenInclude(d => d.Payroll)
+                .FirstOrDefaultAsync(p => p.Id == entity.Id && p.IsDeleted != true);
+            if (createdEntity is null)
+                throw new EntityNotFoundException(nameof(PayrollInquiry), $"Id = {entity.Id}");
+
+            return _mapper.Map<PayrollInquiryDto>(createdEntity);
         }
 
         public async Task Delete(int id)
@@ -75,7 +98,10 @@ namespace HRM_BE.Data.Repositories
 
         private async Task<PayrollInquiry> GetPayrollInquiryAndCheckExist(int payrollInquiryId)
         {
-            var payrollInquiry = await _dbContext.PayrollInquiries.FindAsync(payrollInquiryId);
+            var payrollInquiry = await _dbContext.PayrollInquiries
+                .Include(p => p.PayrollDetail)
+                .ThenInclude(d => d.Payroll)
+                .FirstOrDefaultAsync(p => p.Id == payrollInquiryId && p.IsDeleted != true);
             if (payrollInquiry is null)
                 throw new EntityNotFoundException(nameof(PayrollInquiry), $"Id = {payrollInquiryId}");
             return payrollInquiry;
