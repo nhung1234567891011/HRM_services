@@ -22,7 +22,7 @@ namespace HRM_BE.Api.Mappers
                     && (
                         (src.Employee.StaffPosition.PositionCode != null
                          && (src.Employee.StaffPosition.PositionCode.ToUpper().StartsWith("SALE")
-                             || src.Employee.StaffPosition.PositionCode.ToUpper() == "CTV"))
+                             || src.Employee.StaffPosition.PositionCode.ToUpper().StartsWith("CTV")))
                         || (src.Employee.StaffPosition.PositionName != null
                             && (src.Employee.StaffPosition.PositionName.ToUpper().Contains("SALE")
                                 || src.Employee.StaffPosition.PositionName.ToUpper().Contains("CTV")))

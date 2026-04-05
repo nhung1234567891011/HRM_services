@@ -14,12 +14,13 @@ namespace HRM_BE.Core.Models.DetailTimeSheet
     public class GetDetailTimesheetWithEmployeeDto
     {
         public int Id { get; set; }
-        public string EmployeeCode { get; set; }
+        public string EmployeeCode { get; set; } = string.Empty;
         public string? LastName { get; set; }
         public string? FirstName { get; set; }
-        public List<ConfirmTimeSheetDto> Timesheets { get; set; }
-        public List<PermittedLeaveDto>? PermittedLeaves { get; set; }
-        public List<HolidayDto> Holidays { get; set; }
+        public string? OrganizationName { get; set; }
+        public List<ConfirmTimeSheetDto> Timesheets { get; set; } = new List<ConfirmTimeSheetDto>();
+        public List<PermittedLeaveDto> PermittedLeaves { get; set; } = new List<PermittedLeaveDto>();
+        public List<HolidayDto> Holidays { get; set; } = new List<HolidayDto>();
         public bool IsOffical { get; set; }
     }
 }

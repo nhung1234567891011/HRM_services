@@ -148,6 +148,68 @@ namespace HRM_BE.Data.Repositories
             return result;
         }
 
+        public async Task<List<PayrollDetailDto>> GetExportData(ExportPayrollDetailRequest request)
+        {
+            var query = _dbContext.PayrollDetails
+                .Where(p => p.IsDeleted != true)
+                .AsQueryable();
+
+            if (request.OrganizationId.HasValue)
+            {
+                query = query.Where(p => p.OrganizationId == request.OrganizationId);
+            }
+
+            if (request.EmployeeId.HasValue)
+            {
+                query = query.Where(p => p.EmployeeId == request.EmployeeId);
+            }
+
+            if (!string.IsNullOrWhiteSpace(request.Name))
+            {
+                var keyword = request.Name.Trim();
+                var pattern = $"%{keyword}%";
+
+                query = query.Where(p =>
+                    (p.FullName != null && EF.Functions.Like(p.FullName, pattern)) ||
+                    (p.EmployeeCode != null && EF.Functions.Like(p.EmployeeCode, pattern)));
+            }
+
+            if (request.DetailTimesheetId.HasValue)
+            {
+                var detailTimesheetId = request.DetailTimesheetId.Value;
+                query = query.Where(p =>
+                    p.PayrollId.HasValue &&
+                    _dbContext.PayrollSummaryTimesheets.Any(ps =>
+                        ps.PayrollId == p.PayrollId &&
+                        ps.SummaryTimesheetNameId.HasValue &&
+                        _dbContext.SummaryTimesheetNameDetailTimesheetNames.Any(sd =>
+                            sd.SummaryTimesheetNameId == ps.SummaryTimesheetNameId &&
+                            sd.DetailTimesheetNameId == detailTimesheetId)));
+            }
+
+            if (request.StartDate.HasValue || request.EndDate.HasValue)
+            {
+                var startDate = request.StartDate?.Date ?? DateTime.MinValue.Date;
+                var endDate = request.EndDate?.Date ?? DateTime.MaxValue.Date;
+
+                query = query.Where(p =>
+                    p.PayrollId.HasValue &&
+                    _dbContext.PayrollSummaryTimesheets.Any(ps =>
+                        ps.PayrollId == p.PayrollId &&
+                        ps.SummaryTimesheetNameId.HasValue &&
+                        _dbContext.SummaryTimesheetNameDetailTimesheetNames.Any(sd =>
+                            sd.SummaryTimesheetNameId == ps.SummaryTimesheetNameId &&
+                            sd.DetailTimesheetName.StartDate.HasValue &&
+                            sd.DetailTimesheetName.EndDate.HasValue &&
+                            sd.DetailTimesheetName.StartDate.Value.Date <= endDate &&
+                            sd.DetailTimesheetName.EndDate.Value.Date >= startDate)));
+            }
+
+            query = query.ApplySorting(request.SortBy ?? "Id", request.OrderBy ?? "desc");
+
+            return await _mapper.ProjectTo<PayrollDetailDto>(query).ToListAsync();
+        }
+
 
         private async Task<PayrollDetail> GetPayrollDetailAndCheckExist(int payrollDetailId)
         {
@@ -581,6 +643,7 @@ namespace HRM_BE.Data.Repositories
                 var commissionAmount = ResolveRevenueCommissionAmount(
                     organizationIdForComponent,
                     employee?.StaffPosition?.PositionCode,
+                    employee?.StaffPosition?.PositionName,
                     revenue,
                     payrollDate);
 
@@ -1052,24 +1115,13 @@ namespace HRM_BE.Data.Repositories
         private decimal ResolveRevenueCommissionAmount(
             int? organizationId,
             string? staffPositionCode,
+            string? staffPositionName,
             decimal revenue,
             DateTime payrollDate)
         {
             if (!organizationId.HasValue) return 0m;
             if (revenue <= 0m) return 0m;
-            if (string.IsNullOrWhiteSpace(staffPositionCode)) return 0m;
-
-            var code = staffPositionCode.Trim().ToUpperInvariant();
-            RevenueCommissionTargetType? targetType = null;
-
-            if (code == "CTV")
-            {
-                targetType = RevenueCommissionTargetType.Ctv;
-            }
-            else if (code.StartsWith("SALE"))
-            {
-                targetType = RevenueCommissionTargetType.Sale;
-            }
+            var targetType = ResolveRevenueCommissionTargetType(staffPositionCode, staffPositionName);
 
             if (!targetType.HasValue) return 0m;
 
@@ -1091,6 +1143,27 @@ namespace HRM_BE.Data.Repositories
             return CalculateProgressiveCommission(revenue, policy.Tiers);
         }
 
+        private static RevenueCommissionTargetType? ResolveRevenueCommissionTargetType(
+            string? staffPositionCode,
+            string? staffPositionName)
+        {
+            var code = (staffPositionCode ?? string.Empty).Trim().ToUpperInvariant();
+            var name = (staffPositionName ?? string.Empty).Trim().ToUpperInvariant();
+
+            // Support common variants like CTV01/CTV_KD and SALE01/SALE_TEAM.
+            if (code.StartsWith("CTV") || code.Contains("CTV") || name.Contains("CTV") || name.Contains("CONG TAC VIEN") || name.Contains("CỘNG TÁC VIÊN"))
+            {
+                return RevenueCommissionTargetType.Ctv;
+            }
+
+            if (code.StartsWith("SALE") || code.Contains("SALE") || name.Contains("SALE") || name.Contains("KINH DOANH"))
+            {
+                return RevenueCommissionTargetType.Sale;
+            }
+
+            return null;
+        }
+
         private static decimal CalculateProgressiveCommission(decimal revenue, IEnumerable<RevenueCommissionTier> tiers)
         {
             if (revenue <= 0m) return 0m;
@@ -1102,26 +1175,30 @@ namespace HRM_BE.Data.Repositories
                 .ThenBy(t => t.SortOrder)
                 .ToList();
 
-            decimal total = 0m;
+            var matchedTier = ordered.LastOrDefault(t =>
+                revenue > t.FromAmount &&
+                (!t.ToAmount.HasValue || revenue <= t.ToAmount.Value));
 
-            foreach (var tier in ordered)
+            if (matchedTier == null)
             {
-                var from = tier.FromAmount;
-                var to = tier.ToAmount;
-
-                if (revenue <= from) continue;
-
-                var upper = to.HasValue && to.Value > from ? to.Value : revenue;
-                var applicable = Math.Min(revenue, upper) - from;
-                if (applicable <= 0m) continue;
-
-                var rate = tier.RatePercent;
-                if (rate <= 0m) continue;
-
-                total += applicable * (rate / 100m);
+                matchedTier = ordered.LastOrDefault(t => revenue > t.FromAmount);
             }
 
-            return total;
+            if (matchedTier == null || matchedTier.RatePercent <= 0m)
+            {
+                return 0m;
+            }
+
+            var upperBound = matchedTier.ToAmount.HasValue && matchedTier.ToAmount.Value > matchedTier.FromAmount
+                ? matchedTier.ToAmount.Value
+                : revenue;
+            var applicable = Math.Min(revenue, upperBound) - matchedTier.FromAmount;
+            if (applicable <= 0m)
+            {
+                return 0m;
+            }
+
+            return applicable * (matchedTier.RatePercent / 100m);
         }
 
         public async Task Delete(int id)
