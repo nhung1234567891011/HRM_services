@@ -986,6 +986,9 @@ namespace HRM_BE.Data.Repositories
 
             // Cập nhật trạng thái xác nhận của bảng lương tổng (reset về NotSent vì tất cả PayrollDetail mới tạo đều có status NotSent)
             await UpdatePayrollConfirmationStatus(payrollId);
+
+            // Khi quản lý cập nhật lại phiếu lương, các thắc mắc đang chờ xử lý trong kỳ lương này được chuyển sang đã xử lý.
+            await ResolvePendingPayrollInquiries(payrollId: payrollId);
         }
 
         public async Task Update(int id, UpdatePayrollDetailRequest request)
@@ -1109,6 +1112,40 @@ namespace HRM_BE.Data.Repositories
             }
 
             await UpdateAsync(payrollDetail);
+
+            // Khi quản lý sửa phiếu lương của nhân viên, các thắc mắc pending của phiếu đó được đánh dấu đã xử lý.
+            await ResolvePendingPayrollInquiries(payrollDetailId: payrollDetail.Id);
+        }
+
+        private async Task ResolvePendingPayrollInquiries(int? payrollId = null, int? payrollDetailId = null)
+        {
+            if (!payrollId.HasValue && !payrollDetailId.HasValue)
+            {
+                return;
+            }
+
+            var query = _dbContext.PayrollInquiries
+                .Where(i => i.IsDeleted != true && i.Status == InquiryStatus.Pending)
+                .AsQueryable();
+
+            if (payrollDetailId.HasValue)
+            {
+                query = query.Where(i => i.PayrollDetailId == payrollDetailId.Value);
+            }
+            else if (payrollId.HasValue)
+            {
+                var payrollDetailIdsInPayroll = _dbContext.PayrollDetails
+                    .Where(pd => pd.PayrollId == payrollId.Value)
+                    .Select(pd => pd.Id);
+
+                query = query.Where(i =>
+                    i.PayrollDetailId.HasValue &&
+                    payrollDetailIdsInPayroll.Contains(i.PayrollDetailId.Value));
+            }
+
+            await query.ExecuteUpdateAsync(setters => setters
+                .SetProperty(i => i.Status, InquiryStatus.Resolved)
+                .SetProperty(i => i.UpdatedAt, DateTime.Now));
         }
 
         private decimal ResolveRevenueCommissionAmount(
