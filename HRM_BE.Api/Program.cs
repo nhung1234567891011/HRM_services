@@ -8,6 +8,7 @@ using System.Text.Json;
 using Serilog;
 using Microsoft.AspNetCore.Mvc.Formatters;
 using Hangfire;
+using Microsoft.AspNetCore.Http.HttpResults;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -101,7 +102,10 @@ app.UseHangfireDashboard();
 app.MapControllers();
 app.MapHub<RefreshTokenHub>("/hubs/refresh-token-hub");
 app.MapHub<RemindWorkHub>("/hubs/remind-work-notification-hub");
-
+app.MapGet("/db-test", async () =>
+{
+    return "Success";
+});
 
 //app.MigrateDatabase();
 
