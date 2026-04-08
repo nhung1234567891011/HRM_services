@@ -21,7 +21,7 @@
                     //.AllowAnyMethod()
                     //.AllowAnyHeader());
                     .WithOrigins("http://localhost:4200", "https://localhost:4200", "http://103.153.69.217:6009",
-                    "http://103.153.69.217:7009", "https://103.153.69.217:7009", "https://103.153.69.217:6009", "http://hrm.smomedia.vn", "https://hrm.smomedia.vn")
+                    "http://103.153.69.217:7009", "https://103.153.69.217:7009", "https://103.153.69.217:6009", "http://hrm.smomedia.vn", "https://hrm.smomedia.vn", "https://hrm-web-git-master-mtuans-projects.vercel.app/", "http://chiasecode.net", "https://chiasecode.net", "https://hrm-web-iota.vercel.app/")
                     .AllowAnyMethod()
                     .AllowAnyHeader()
                     .AllowCredentials());
