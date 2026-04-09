@@ -16,6 +16,7 @@ using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.EntityFrameworkCore;
+using HRM_BE.Core.Helpers;
 
 namespace HRM_BE.Api.Services
 {
@@ -91,7 +92,7 @@ namespace HRM_BE.Api.Services
 
             var subject = new ClaimsIdentity(claims);
             var creds = new SigningCredentials(new SymmetricSecurityKey(Encoding.ASCII.GetBytes(key)), SecurityAlgorithms.HmacSha256Signature);
-            var expires = DateTime.Now.AddDays(30);
+            var expires = DateTimeHelper.UtcNow.AddDays(30);
 
             var tokenDescriptor = new SecurityTokenDescriptor
             {
@@ -229,7 +230,7 @@ namespace HRM_BE.Api.Services
             #endregion
 
 
-            user.RefreshTokenExpiryTime = DateTime.Now.AddDays(30);
+            user.RefreshTokenExpiryTime = DateTimeHelper.UtcNow.AddDays(30);
             user.IsRefreshToken = false;
 
             await _userManager.UpdateAsync(user);
@@ -240,7 +241,7 @@ namespace HRM_BE.Api.Services
             {
                 AccessToken = newAccessToken,
                 RefreshToken = user.RefreshToken,
-                Expiration = DateTime.Now.AddDays(30)
+                Expiration = DateTimeHelper.UtcNow.AddDays(30)
 
             };
 

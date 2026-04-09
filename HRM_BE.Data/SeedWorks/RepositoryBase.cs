@@ -8,6 +8,7 @@ using System.Collections;
 using HRM_BE.Core.Exceptions;
 using HRM_BE.Core.Exceptions;
 using Microsoft.EntityFrameworkCore.Storage;
+using HRM_BE.Core.Helpers;
 
 namespace HRM_BE.Data.SeedWorks
 {
@@ -66,13 +67,13 @@ namespace HRM_BE.Data.SeedWorks
                 PropertyInfo? propertyInfoCreateAt = entity.GetType().GetProperty("CreatedAt");
                 if (propertyInfoCreateAt != null)
                 {
-                    entity.CreatedAt = DateTime.Now;
+                    entity.CreatedAt = DateTimeHelper.BusinessNow;
                 }
 
                 PropertyInfo? propertyInfoUpdateAt = entity.GetType().GetProperty("UpdatedAt");
                 if (propertyInfoUpdateAt != null)
                 {
-                    entity.UpdatedAt = DateTime.Now;
+                    entity.UpdatedAt = DateTimeHelper.BusinessNow;
                 }
 
                 PropertyInfo? propertyInfoIsDeleted = entity.GetType().GetProperty("IsDeleted");
@@ -135,13 +136,13 @@ namespace HRM_BE.Data.SeedWorks
                 PropertyInfo? propertyInfoCreateAt = entity.GetType().GetProperty("CreatedAt");
                 if (propertyInfoCreateAt != null)
                 {
-                    propertyInfoCreateAt.SetValue(entity, DateTime.Now);
+                    propertyInfoCreateAt.SetValue(entity, DateTimeHelper.BusinessNow);
                 }
 
                 PropertyInfo? propertyInfoUpdateAt = entity.GetType().GetProperty("UpdatedAt");
                 if (propertyInfoUpdateAt != null)
                 {
-                    propertyInfoUpdateAt.SetValue(entity, DateTime.Now);
+                    propertyInfoUpdateAt.SetValue(entity, DateTimeHelper.BusinessNow);
                 }
 
                 if (httpContext != null)
@@ -191,7 +192,7 @@ namespace HRM_BE.Data.SeedWorks
             if (_dbContext.Entry(update).State == EntityState.Unchanged) return;
             T? exist = _dbContext.Set<T>().Find(update.Id);
             if (exist == null) { throw new Exception("Record for update not found"); }
-            update.UpdatedAt = DateTime.Now;
+            update.UpdatedAt = DateTimeHelper.BusinessNow;
             update.CreatedAt = exist.CreatedAt;
             PropertyInfo? propertyVersion = exist.GetType().GetProperty("Version");
             if (propertyVersion != null)
@@ -259,7 +260,7 @@ namespace HRM_BE.Data.SeedWorks
                 PropertyInfo? propertyInfoUpdatedAt = entity.GetType().GetProperty("UpdatedAt");
                 if (propertyInfoUpdatedAt != null)
                 {
-                    propertyInfoUpdatedAt.SetValue(entity, DateTime.Now);
+                    propertyInfoUpdatedAt.SetValue(entity, DateTimeHelper.BusinessNow);
                 }
 
                 PropertyInfo? propertyInfoCreatedAt = entity.GetType().GetProperty("CreatedAt");

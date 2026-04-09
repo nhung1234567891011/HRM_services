@@ -2,6 +2,7 @@ using HRM_BE.Core.Data.Payroll_Timekeeping.TimekeepingRegulation;
 using HRM_BE.Core.ISeedWorks;
 using HRM_BE.Core.Models.Common;
 using HRM_BE.Core.Models.Payroll_Timekeeping.TimekeepingRegulation;
+using HRM_BE.Core.Helpers;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using System.Linq;
@@ -12,12 +13,6 @@ namespace HRM_BE.Api.Controllers.Payroll_Timekeeping.TimekeepingRegulation
     [ApiController]
     public class TimekeepingGpsLogController : ControllerBase
     {
-        private static readonly string[] VietnamTimeZoneIds =
-        {
-            "Asia/Ho_Chi_Minh", // Linux/macOS
-            "SE Asia Standard Time" // Windows
-        };
-
         private readonly IUnitOfWork _unitOfWork;
         public TimekeepingGpsLogController(IUnitOfWork unitOfWork)
         {
@@ -47,7 +42,7 @@ namespace HRM_BE.Api.Controllers.Payroll_Timekeeping.TimekeepingRegulation
             }
 
             // Lấy ca làm việc (shiftWorkId) cho ngày hiện tại
-            var nowDay = GetBusinessNow();
+            var nowDay = DateTimeHelper.BusinessNow;
             var shiftWorkId = await _unitOfWork.ShiftWorks.GetShiftWorkIdForModuleTimekeepingGpsInOutAsync(organizationId, nowDay);
 
             if (!shiftWorkId.HasValue)
@@ -109,7 +104,7 @@ namespace HRM_BE.Api.Controllers.Payroll_Timekeeping.TimekeepingRegulation
         [HttpPost("checkin-checkout")]
         public async Task<IActionResult> CheckinCheckout([FromBody] CheckinCheckoutRequest request)
         {
-            var nowDay = GetBusinessNow();
+            var nowDay = DateTimeHelper.BusinessNow;
             var nowHourOfDay = nowDay.TimeOfDay;
 
             // Kiểm tra xem EmployeeId có tồn tại không
@@ -349,30 +344,6 @@ namespace HRM_BE.Api.Controllers.Payroll_Timekeeping.TimekeepingRegulation
             return deg * (Math.PI / 180);
         }
 
-        private static DateTime GetBusinessNow()
-        {
-            var utcNow = DateTimeOffset.UtcNow;
-
-            foreach (var timeZoneId in VietnamTimeZoneIds)
-            {
-                try
-                {
-                    var tz = TimeZoneInfo.FindSystemTimeZoneById(timeZoneId);
-                    return TimeZoneInfo.ConvertTime(utcNow, tz).DateTime;
-                }
-                catch (TimeZoneNotFoundException)
-                {
-                    // Try next timezone id.
-                }
-                catch (InvalidTimeZoneException)
-                {
-                    // Try next timezone id.
-                }
-            }
-
-            // Fallback an toàn nếu môi trường chưa có timezone data.
-            return utcNow.UtcDateTime.AddHours(7);
-        }
     }
 
     public class CheckInStatus

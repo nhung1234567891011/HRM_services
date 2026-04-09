@@ -14,6 +14,7 @@ using Microsoft.EntityFrameworkCore;
 using static System.Net.WebRequestMethods;
 using System.Text;
 using HRM_BE.Core.Data.Staff;
+using HRM_BE.Core.Helpers;
 
 namespace HRM_BE.Api.Controllers.Identity
 {
@@ -141,7 +142,7 @@ namespace HRM_BE.Api.Controllers.Identity
                 throw new ArgumentNullException(nameof(refreshTokenValidityInDays), "Không thể tải cấu hình RefreshTokenValidityInDays Jwt!");
             }
 
-            var refreshTokenExpiryTime = DateTime.Now.AddDays(int.Parse(refreshTokenValidityInDays));
+            var refreshTokenExpiryTime = DateTimeHelper.UtcNow.AddDays(int.Parse(refreshTokenValidityInDays));
 
             user.RefreshToken = refreshToken;
             user.RefreshTokenExpiryTime = refreshTokenExpiryTime;
@@ -153,7 +154,7 @@ namespace HRM_BE.Api.Controllers.Identity
             {
                 AccessToken = token,
                 RefreshToken = refreshToken,
-                Expiration = DateTime.Now.AddDays(30)
+                Expiration = DateTimeHelper.UtcNow.AddDays(30)
             };
 
 
@@ -273,7 +274,7 @@ namespace HRM_BE.Api.Controllers.Identity
                 user.UserName = user.Email;
                 user.PasswordHash = null;
                 user.ActivationCode = Guid.NewGuid().ToString();
-                user.ActivationExpiry = DateTime.Now.AddHours(24);
+                user.ActivationExpiry = DateTimeHelper.UtcNow.AddHours(24);
 
                 await _userManager.UpdateAsync(user);
 
@@ -288,7 +289,7 @@ namespace HRM_BE.Api.Controllers.Identity
                 user.EmailConfirmed = false;
                 user.PasswordHash = null;
                 user.ActivationCode = Guid.NewGuid().ToString();
-                user.ActivationExpiry = DateTime.Now.AddHours(24);
+                user.ActivationExpiry = DateTimeHelper.UtcNow.AddHours(24);
                 user.EmployeeId = request.EmployeeId;
 
 
@@ -371,7 +372,7 @@ namespace HRM_BE.Api.Controllers.Identity
                     user.UserName = user.Email;
                     user.PasswordHash = null;
                     user.ActivationCode = Guid.NewGuid().ToString();
-                    user.ActivationExpiry = DateTime.Now.AddHours(24);
+                    user.ActivationExpiry = DateTimeHelper.UtcNow.AddHours(24);
 
                     await _userManager.UpdateAsync(user);
                 }
@@ -385,7 +386,7 @@ namespace HRM_BE.Api.Controllers.Identity
                     user.EmailConfirmed = false;
                     user.PasswordHash = null;
                     user.ActivationCode = Guid.NewGuid().ToString();
-                    user.ActivationExpiry = DateTime.Now.AddHours(24);
+                    user.ActivationExpiry = DateTimeHelper.UtcNow.AddHours(24);
                     user.EmployeeId = request.EmployeeId;
 
                     var createResult = await _userManager.CreateAsync(user);
@@ -561,7 +562,7 @@ namespace HRM_BE.Api.Controllers.Identity
 
                 // Tạo lại mã kích hoạt và thời gian hết hạn
                 user.ActivationCode = Guid.NewGuid().ToString();
-                user.ActivationExpiry = DateTime.Now.AddHours(24);
+                user.ActivationExpiry = DateTimeHelper.UtcNow.AddHours(24);
                 user.UserName = email;
 
                 // Cập nhật lại người dùng

@@ -23,6 +23,7 @@ using Microsoft.VisualBasic;
 using System.Data;
 using System.Reflection.Emit;
 using System.Xml.Linq;
+using HRM_BE.Core.Helpers;
 namespace HRM_BE.Data
 {
     public class HrmContext : IdentityDbContext<User, Role, int>
@@ -421,7 +422,7 @@ namespace HRM_BE.Data
                 if ((entityEntry.State == EntityState.Added || entityEntry.State == EntityState.Modified)
                     && dateCreatedProp != null)
                 {
-                    dateCreatedProp.SetValue(entityEntry.Entity, DateTime.Now);
+                    dateCreatedProp.SetValue(entityEntry.Entity, DateTimeHelper.BusinessNow);
                 }
             }
             return base.SaveChangesAsync(cancellationToken);
