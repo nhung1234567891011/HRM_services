@@ -12,6 +12,12 @@ namespace HRM_BE.Api.Controllers.Payroll_Timekeeping.TimekeepingRegulation
     [ApiController]
     public class TimekeepingGpsLogController : ControllerBase
     {
+        private static readonly string[] VietnamTimeZoneIds =
+        {
+            "Asia/Ho_Chi_Minh", // Linux/macOS
+            "SE Asia Standard Time" // Windows
+        };
+
         private readonly IUnitOfWork _unitOfWork;
         public TimekeepingGpsLogController(IUnitOfWork unitOfWork)
         {
@@ -41,7 +47,7 @@ namespace HRM_BE.Api.Controllers.Payroll_Timekeeping.TimekeepingRegulation
             }
 
             // Lấy ca làm việc (shiftWorkId) cho ngày hiện tại
-            var nowDay = DateTime.Now;
+            var nowDay = GetBusinessNow();
             var shiftWorkId = await _unitOfWork.ShiftWorks.GetShiftWorkIdForModuleTimekeepingGpsInOutAsync(organizationId, nowDay);
 
             if (!shiftWorkId.HasValue)
@@ -103,8 +109,8 @@ namespace HRM_BE.Api.Controllers.Payroll_Timekeeping.TimekeepingRegulation
         [HttpPost("checkin-checkout")]
         public async Task<IActionResult> CheckinCheckout([FromBody] CheckinCheckoutRequest request)
         {
-            var nowHourOfDay = DateTime.Now.TimeOfDay;
-            var nowDay = DateTime.Now;
+            var nowDay = GetBusinessNow();
+            var nowHourOfDay = nowDay.TimeOfDay;
 
             // Kiểm tra xem EmployeeId có tồn tại không
             var employee = await _unitOfWork.Employees.GetByIdAsync(request.EmployeeId);
@@ -241,7 +247,7 @@ namespace HRM_BE.Api.Controllers.Payroll_Timekeeping.TimekeepingRegulation
                     EmployeeId = request.EmployeeId,
                     ShiftWorkId = shiftWorkId.Value,
                     Date = nowDay,
-                    StartTime = DateTime.Now.TimeOfDay,
+                    StartTime = nowHourOfDay,
                     TimekeepingType = TimekeepingType.GPS,
                     LateDuration = 0,
                     EarlyLeaveDuration = 0
@@ -249,7 +255,7 @@ namespace HRM_BE.Api.Controllers.Payroll_Timekeeping.TimekeepingRegulation
 
                 // Lấy giờ làm việc bắt đầu
                 var shiftStartTime = shiftCatalog.StartTime;
-                var checkInTime = DateTime.Now.TimeOfDay;
+                var checkInTime = nowHourOfDay;
 
                 // Logic mới: chấm vào sớm hơn giờ ca thì ghi nhận từ giờ bắt đầu ca
                 if (shiftStartTime != null)
@@ -283,7 +289,7 @@ namespace HRM_BE.Api.Controllers.Payroll_Timekeeping.TimekeepingRegulation
                 // Cập nhật thời gian checkout vào bảng Timesheet
                 if (timesheet != null)
                 {
-                    var checkOutTime = DateTime.Now.TimeOfDay;
+                    var checkOutTime = nowHourOfDay;
                     var shiftEndTime = shiftCatalog.EndTime;
 
                     // Logic mới: chấm ra muộn hơn giờ ca thì ghi nhận giờ kết thúc ca
@@ -341,6 +347,31 @@ namespace HRM_BE.Api.Controllers.Payroll_Timekeeping.TimekeepingRegulation
         private double DegreeToRadian(double deg)
         {
             return deg * (Math.PI / 180);
+        }
+
+        private static DateTime GetBusinessNow()
+        {
+            var utcNow = DateTimeOffset.UtcNow;
+
+            foreach (var timeZoneId in VietnamTimeZoneIds)
+            {
+                try
+                {
+                    var tz = TimeZoneInfo.FindSystemTimeZoneById(timeZoneId);
+                    return TimeZoneInfo.ConvertTime(utcNow, tz).DateTime;
+                }
+                catch (TimeZoneNotFoundException)
+                {
+                    // Try next timezone id.
+                }
+                catch (InvalidTimeZoneException)
+                {
+                    // Try next timezone id.
+                }
+            }
+
+            // Fallback an toàn nếu môi trường chưa có timezone data.
+            return utcNow.UtcDateTime.AddHours(7);
         }
     }
 
