@@ -22,8 +22,18 @@ namespace HRM_BE.Api.Controllers.Employee
             return result;
         } 
         [HttpPut("update")]
-        public async Task<IActionResult> Update(int id, UpdateContactInfoRequest request)
+        public async Task<IActionResult> Update([FromQuery] int id, [FromBody] UpdateContactInfoRequest request)
         {
+            if (id <= 0)
+            {
+                throw new BadHttpRequestException("Id không hợp lệ.");
+            }
+
+            if (request == null)
+            {
+                throw new BadHttpRequestException("Dữ liệu cập nhật không hợp lệ.");
+            }
+
             await _unitOfWork.ContactInfos.Update(id,request);
             return Ok(ApiResult<bool>.Success("Cập nhật thông tin liên hệ thành công",true));
         }

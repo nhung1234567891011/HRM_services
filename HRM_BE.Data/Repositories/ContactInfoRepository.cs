@@ -51,8 +51,21 @@ namespace HRM_BE.Data.Repositories
 
         public async Task Update(int id, UpdateContactInfoRequest request)
         {
-            var entity = await _dbContext.ContactInfos.Where( c => c.Id == id &&  c.EmployeeId == request.EmployeeId).SingleOrDefaultAsync();
-            await UpdateAsync(_mapper.Map(request,entity));
+            if (request is null)
+                throw new BadHttpRequestException("Dữ liệu cập nhật không hợp lệ.");
+
+            var entity = await GetContactInfoAndCheckExsit(id);
+
+            if (request.EmployeeId.HasValue && entity.EmployeeId.HasValue && request.EmployeeId.Value != entity.EmployeeId.Value)
+                throw new BadHttpRequestException("EmployeeId không khớp với thông tin liên hệ cần cập nhật.");
+
+            var currentEmployeeId = entity.EmployeeId;
+            _mapper.Map(request, entity);
+
+            // Keep ownership stable to avoid accidental detach when payload omits EmployeeId.
+            entity.EmployeeId = currentEmployeeId;
+
+            await UpdateAsync(entity);
         }
     }
 
