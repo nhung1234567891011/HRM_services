@@ -56,9 +56,6 @@ namespace HRM_BE.Data.Repositories
 
             var entity = await GetContactInfoAndCheckExsit(id);
 
-            if (request.EmployeeId.HasValue && entity.EmployeeId.HasValue && request.EmployeeId.Value != entity.EmployeeId.Value)
-                throw new BadHttpRequestException("EmployeeId không khớp với thông tin liên hệ cần cập nhật.");
-
             var currentEmployeeId = entity.EmployeeId;
             _mapper.Map(request, entity);
 
