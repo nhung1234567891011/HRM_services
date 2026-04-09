@@ -140,6 +140,27 @@ namespace HRM_BE.Data.Repositories
                 throw new BadHttpRequestException("Hợp đồng đã chấm dứt/hết hiệu lực, không được chỉnh sửa thông tin chính.");
         }
 
+        private static bool IsContractActive(DataContract contract, DateTime currentDate)
+        {
+            if (contract.IsDeleted == true || contract.ExpiredStatus == true)
+                return false;
+
+            var effectiveDate = contract.EffectiveDate?.Date;
+            var expiryDate = contract.ExpiryDate?.Date;
+
+            var isEffective = !effectiveDate.HasValue || effectiveDate.Value <= currentDate;
+            var isNotExpired = !expiryDate.HasValue || expiryDate.Value >= currentDate;
+
+            return isEffective && isNotExpired;
+        }
+
+        private static void EnsureContractCanBeDeleted(DataContract contract)
+        {
+            var currentDate = DateTimeHelper.BusinessNow.Date;
+            if (IsContractActive(contract, currentDate))
+                throw new BadHttpRequestException("Hợp đồng còn hiệu lực, không thể xoá.");
+        }
+
         private async Task<DataContract> GetContractAndCheckExsit(int contractId)
         {
             var contract = await _dbContext.Contracts.FindAsync(contractId);
@@ -163,6 +184,7 @@ namespace HRM_BE.Data.Repositories
         public async Task Delete(int id)
         {
             var entity = await GetContractAndCheckExsit(id);
+            EnsureContractCanBeDeleted(entity);
             entity.IsDeleted = true;
             await UpdateAsync(entity);
         }
@@ -170,21 +192,28 @@ namespace HRM_BE.Data.Repositories
         public async Task DeleteRange(ListEntityIdentityRequest<int> ids)
         {
             var listEntity = await _dbContext.Contracts.Where( c => ids.Ids.Contains( c.Id ) ).ToListAsync();
+
+            var currentDate = DateTimeHelper.BusinessNow.Date;
+            if (listEntity.Any(contract => IsContractActive(contract, currentDate)))
+                throw new BadHttpRequestException("Danh sách có hợp đồng còn hiệu lực, không thể xoá.");
+
             listEntity.ForEach(c=> c.IsDeleted = true);
             await UpdateRangeAsync(listEntity);
         }
 
         public async Task<bool> CheckEmployeeHaveContractValid(int employeeId)
         {
-            var currentDate = DateTime.Today;
+            var currentDate = DateTimeHelper.BusinessNow.Date;
 
             // Kiểm tra xem nhân viên có hợp đồng hợp lệ và còn hạn không
             var hasValidContract = await _dbContext.Contracts
                 .AsNoTracking()
                 .AnyAsync(c =>
+                    c.IsDeleted != true &&
+                    c.ExpiredStatus != true &&
                     c.EmployeeId == employeeId &&
-                    c.EffectiveDate <= currentDate &&
-                    (c.ExpiryDate == null || c.ExpiryDate >= currentDate));
+                    (!c.EffectiveDate.HasValue || c.EffectiveDate.Value.Date <= currentDate) &&
+                    (!c.ExpiryDate.HasValue || c.ExpiryDate.Value.Date >= currentDate));
 
             return hasValidContract;
         }
