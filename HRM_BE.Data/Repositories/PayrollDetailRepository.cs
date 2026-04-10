@@ -20,6 +20,7 @@ using System.Threading.Tasks;
 using HRM_BE.Core.Data.Official_Form;
 using HRM_BE.Core.Data.Payroll_Timekeeping.TimekeepingRegulation;
 using HRM_BE.Core.Data.Payroll_Timekeeping.LeaveRegulation;
+using HRM_BE.Core.Helpers;
 
 namespace HRM_BE.Data.Repositories
 {
@@ -1338,6 +1339,7 @@ namespace HRM_BE.Data.Repositories
             }
 
             var payrollDetailIds = request.PayrollDetailIds.Distinct().ToList();
+            var responseDeadline = DateTimeHelper.NormalizeToBusinessDate(request.ResponseDeadline);
 
             var payrollIds = await _dbContext.PayrollDetails
                 .Where(p => payrollDetailIds.Contains(p.Id) && p.IsDeleted != true)
@@ -1349,7 +1351,7 @@ namespace HRM_BE.Data.Repositories
                 .Where(p => payrollDetailIds.Contains(p.Id) && p.IsDeleted != true)
                 .ExecuteUpdateAsync(setters => setters
                     .SetProperty(p => p.ConfirmationStatus, PayrollConfirmationStatusEmployee.Confirming)
-                    .SetProperty(p => p.ResponseDeadline, request.ResponseDeadline));
+                    .SetProperty(p => p.ResponseDeadline, responseDeadline));
 
             if (updatedRows == 0)
             {
@@ -1381,7 +1383,7 @@ namespace HRM_BE.Data.Repositories
             }
 
             payrollDetail.ConfirmationStatus = PayrollConfirmationStatusEmployee.Confirmed;
-            payrollDetail.ConfirmationDate = DateTime.Now;
+            payrollDetail.ConfirmationDate = DateTimeHelper.BusinessNow;
 
             await UpdateAsync(payrollDetail);
 

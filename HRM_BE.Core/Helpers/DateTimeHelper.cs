@@ -39,5 +39,29 @@ namespace HRM_BE.Core.Helpers
 
             return utc.AddHours(7);
         }
+
+        public static DateTime ConvertToBusiness(DateTime dateTime)
+        {
+            if (dateTime.Kind == DateTimeKind.Unspecified)
+            {
+                return dateTime;
+            }
+
+            var utc = dateTime.Kind == DateTimeKind.Utc
+                ? dateTime
+                : dateTime.ToUniversalTime();
+
+            return ConvertUtcToBusiness(utc);
+        }
+
+        public static DateTime NormalizeToBusinessDate(DateTime dateTime)
+        {
+            return ConvertToBusiness(dateTime).Date;
+        }
+
+        public static DateTime? NormalizeToBusinessDate(DateTime? dateTime)
+        {
+            return dateTime.HasValue ? NormalizeToBusinessDate(dateTime.Value) : null;
+        }
     }
 }
