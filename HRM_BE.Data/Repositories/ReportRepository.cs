@@ -185,7 +185,14 @@ namespace HRM_BE.Data.Repositories
             };
         }
 
-        public async Task<PerformanceReportDto> GetPerformanceReport(int? organizationId, int? year, int? month)
+        public async Task<PerformanceReportDto> GetPerformanceReport(
+            int? organizationId,
+            int? year,
+            int? month,
+            int? fromYear,
+            int? fromMonth,
+            int? toYear,
+            int? toMonth)
         {
             var payrollQuery = _dbContext.PayrollDetails
                 .Where(pd => pd.IsDeleted == false &&
@@ -195,11 +202,35 @@ namespace HRM_BE.Data.Repositories
             if (organizationId.HasValue)
                 payrollQuery = payrollQuery.Where(pd => pd.OrganizationId == organizationId.Value);
 
-            if (year.HasValue)
-                payrollQuery = payrollQuery.Where(pd => pd.CreatedAt.HasValue && pd.CreatedAt.Value.Year == year.Value);
+            var hasValidRange =
+                fromYear.HasValue &&
+                fromMonth.HasValue &&
+                toYear.HasValue &&
+                toMonth.HasValue &&
+                fromMonth.Value >= 1 && fromMonth.Value <= 12 &&
+                toMonth.Value >= 1 && toMonth.Value <= 12;
 
-            if (month.HasValue)
-                payrollQuery = payrollQuery.Where(pd => pd.CreatedAt.HasValue && pd.CreatedAt.Value.Month == month.Value);
+            if (hasValidRange)
+            {
+                var fromDate = new DateTime(fromYear!.Value, fromMonth!.Value, 1);
+                var toDate = new DateTime(toYear!.Value, toMonth!.Value, 1);
+
+                var rangeStart = fromDate <= toDate ? fromDate : toDate;
+                var rangeEndExclusive = (fromDate <= toDate ? toDate : fromDate).AddMonths(1);
+
+                payrollQuery = payrollQuery.Where(pd =>
+                    pd.CreatedAt.HasValue &&
+                    pd.CreatedAt.Value >= rangeStart &&
+                    pd.CreatedAt.Value < rangeEndExclusive);
+            }
+            else
+            {
+                if (year.HasValue)
+                    payrollQuery = payrollQuery.Where(pd => pd.CreatedAt.HasValue && pd.CreatedAt.Value.Year == year.Value);
+
+                if (month.HasValue)
+                    payrollQuery = payrollQuery.Where(pd => pd.CreatedAt.HasValue && pd.CreatedAt.Value.Month == month.Value);
+            }
 
             var payrollData = await payrollQuery
                 .Select(pd => new

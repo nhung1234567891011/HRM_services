@@ -40,9 +40,23 @@ namespace HRM_BE.Api.Controllers.Report
         /// Báo cáo hiệu suất
         /// </summary>
         [HttpGet("performance")]
-        public async Task<ApiResult<PerformanceReportDto>> GetPerformanceReport([FromQuery] int? organizationId, [FromQuery] int? year, [FromQuery] int? month)
+        public async Task<ApiResult<PerformanceReportDto>> GetPerformanceReport(
+            [FromQuery] int? organizationId,
+            [FromQuery] int? year,
+            [FromQuery] int? month,
+            [FromQuery] int? fromYear,
+            [FromQuery] int? fromMonth,
+            [FromQuery] int? toYear,
+            [FromQuery] int? toMonth)
         {
-            var result = await _unitOfWork.Reports.GetPerformanceReport(organizationId, year, month);
+            var result = await _unitOfWork.Reports.GetPerformanceReport(
+                organizationId,
+                year,
+                month,
+                fromYear,
+                fromMonth,
+                toYear,
+                toMonth);
             return ApiResult<PerformanceReportDto>.Success("Lấy báo cáo hiệu suất thành công", result);
         }
 
