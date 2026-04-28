@@ -123,15 +123,9 @@ namespace HRM_BE.Api.Services
                     throw new ApiException("Không tìm thấy người dùng hợp lệ!", HttpStatusCodeConstant.BadRequest);
                 }
 
-                var permissionsTask = GetPermissionByUserIdAsync(user.Id);
-                var rolesTask = GetRoleNormalizedAsync(user.Id);
-                var employeeTask = GetEmployeeByUser(user.EmployeeId);
-
-                await Task.WhenAll(permissionsTask, rolesTask, employeeTask);
-
-                var permissions = await permissionsTask;
-                var roles = await rolesTask;
-                var employee = await employeeTask;
+                var permissions = await GetPermissionByUserIdAsync(user.Id);
+                var roles = await GetRoleNormalizedAsync(user.Id);
+                var employee = await GetEmployeeByUser(user.EmployeeId);
 
                 var company = new UserCompanyDto();
                 var organization = new UserOrganizationDto();
@@ -139,14 +133,8 @@ namespace HRM_BE.Api.Services
 
                 if (employee != null)
                 {
-                    var companyTask = GetCompanyByEmployee(employee.CompanyId);
-                    var organizationTask =
-                        GetOrganizationByEmployee(employee.OrganizationId);
-
-                    await Task.WhenAll(companyTask, organizationTask);
-
-                    company = await companyTask;
-                    organization = await organizationTask;
+                    company = await GetCompanyByEmployee(employee.CompanyId);
+                    organization = await GetOrganizationByEmployee(employee.OrganizationId);
 
                 }
 
