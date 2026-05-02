@@ -5,6 +5,7 @@ using HRM_BE.Core.Data.Payroll_Timekeeping.Shift;
 using HRM_BE.Core.Data.Staff;
 using HRM_BE.Core.Exceptions;
 using HRM_BE.Core.Extension;
+using HRM_BE.Core.Helpers;
 using HRM_BE.Core.IRepositories;
 using HRM_BE.Core.Models.Common;
 using HRM_BE.Core.Models.Payroll_Timekeeping.LeaveRegulation;
@@ -208,14 +209,24 @@ namespace HRM_BE.Data.Repositories
                 throw new ApiException("Bảng lương đã xác nhận hết thì không xoá được");
             }
 
-            var payrollDetails = await _dbContext.PayrollDetails
+            var payrollDetailEntities = await _dbContext.PayrollDetails
                 .Where(x => x.PayrollId == id && x.IsDeleted != true)
-                .Select(x => x.ConfirmationStatus)
                 .ToListAsync();
 
-            if (payrollDetails.Any() && payrollDetails.All(x => x == PayrollConfirmationStatusEmployee.Confirmed))
+            if (payrollDetailEntities.Any() && payrollDetailEntities.All(x => x.ConfirmationStatus == PayrollConfirmationStatusEmployee.Confirmed))
             {
                 throw new ApiException("Bảng lương đã xác nhận hết thì không xoá được");
+            }
+
+            foreach (var detail in payrollDetailEntities)
+            {
+                detail.IsDeleted = true;
+                detail.UpdatedAt = DateTimeHelper.BusinessNow;
+            }
+
+            if (payrollDetailEntities.Count > 0)
+            {
+                await SaveChangesAsync();
             }
 
             entity.IsDeleted = true;
